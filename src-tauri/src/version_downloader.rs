@@ -32,6 +32,26 @@ pub struct VersionInfo {
 pub struct VersionDetails {
     pub id: String,
     pub downloads: Downloads,
+    #[serde(rename = "assetIndex")]
+    pub asset_index: Option<AssetIndex>,
+}
+
+/// 资源索引信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetIndex {
+    pub id: String,
+    pub sha1: String,
+    pub size: u64,
+    #[serde(rename = "totalSize")]
+    pub total_size: u64,
+    pub url: String,
+}
+
+/// 资源对象信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetObject {
+    pub hash: String,
+    pub size: u64,
 }
 
 /// 下载信息
@@ -245,6 +265,95 @@ pub fn extract_assets_from_jar(jar_path: &Path, output_dir: &Path) -> Result<(),
     Ok(())
 }
 
+/// 下载语言文件
+async fn download_language_file(
+    version_url: &str,
+    output_dir: &Path,
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    
+    // 获取版本详细信息
+    let response = reqwest::get(version_url)
+        .await
+        .map_err(|e| format!("Failed to fetch version details: {}", e))?;
+    
+    let details: VersionDetails = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse version details: {}", e))?;
+    
+    // 检查是否有 assetIndex
+    let asset_index = match details.asset_index {
+        Some(index) => index,
+        None => {
+            println!("No assetIndex found, skipping language file download");
+            return Ok(());
+        }
+    };
+    
+    // 获取资源索引
+    let response = reqwest::get(&asset_index.url)
+        .await
+        .map_err(|e| format!("Failed to fetch asset index: {}", e))?;
+    
+    let assets: HashMap<String, AssetObject> = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|e| format!("Failed to parse asset index: {}", e))?
+        .get("objects")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .ok_or("Failed to parse objects from asset index")?;
+    
+    // 查找中文语言文件
+    let lang_key = "minecraft/lang/zh_cn.json";
+    let lang_asset = match assets.get(lang_key) {
+        Some(asset) => asset,
+        None => {
+            println!("Chinese language file not found in asset index, skipping");
+            return Ok(());
+        }
+    };
+    
+    // 构建下载URL: https://resources.download.minecraft.net/{前2位}/{完整hash}
+    let hash = &lang_asset.hash;
+    let download_url = format!(
+        "https://resources.download.minecraft.net/{}/{}",
+        &hash[0..2],
+        hash
+    );
+    
+    // 下载语言文件
+    let response = reqwest::get(&download_url)
+        .await
+        .map_err(|e| format!("Failed to download language file: {}", e))?;
+    
+    let content = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read language file: {}", e))?;
+    
+    // 保存为 .little100/map.json
+    let little100_dir = output_dir.join(".little100");
+    std::fs::create_dir_all(&little100_dir)
+        .map_err(|e| format!("Failed to create .little100 directory: {}", e))?;
+    
+    let map_json_path = little100_dir.join("map.json");
+    std::fs::write(&map_json_path, &content)
+        .map_err(|e| format!("Failed to write map.json: {}", e))?;
+    
+    // 保存到 assets/minecraft/lang/zh_cn.json
+    let lang_dir = output_dir.join("assets").join("minecraft").join("lang");
+    std::fs::create_dir_all(&lang_dir)
+        .map_err(|e| format!("Failed to create lang directory: {}", e))?;
+    
+    let zh_cn_path = lang_dir.join("zh_cn.json");
+    std::fs::write(&zh_cn_path, &content)
+        .map_err(|e| format!("Failed to write zh_cn.json: {}", e))?;
+    
+    println!("Successfully downloaded and saved language file");
+    Ok(())
+}
+
 /// 下载版本并提取assets
 pub async fn download_and_extract_version(
     version_id: &str,
@@ -252,11 +361,24 @@ pub async fn download_and_extract_version(
     output_dir: &Path,
     keep_cache: bool,
 ) -> Result<String, String> {
+    // 获取版本清单以获取版本URL
+    let manifest = fetch_version_manifest().await?;
+    let version = manifest.versions
+        .iter()
+        .find(|v| v.id == version_id)
+        .ok_or(format!("Version {} not found", version_id))?;
+    
     // 下载jar文件
     let jar_path = download_version(version_id, temp_dir).await?;
     
     // 提取assets
     extract_assets_from_jar(Path::new(&jar_path), output_dir)?;
+    
+    // 下载语言文件
+    if let Err(e) = download_language_file(&version.url, output_dir).await {
+        println!("Warning: Failed to download language file: {}", e);
+        // 不中断流程，继续执行
+    }
     
     // 根据设置决定是否删除jar文件
     if !keep_cache {

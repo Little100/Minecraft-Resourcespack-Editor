@@ -159,7 +159,7 @@ pub fn scan_pack_directory(root_path: &Path) -> Result<PackInfo, String> {
                 PackMeta {
                     pack: PackMetaInfo {
                         pack_format: 34, // 默认使用最新格式
-                        description: format!("⚠️ pack.mcmeta格式错误: {}", e),
+                        description: format!("️pack.mcmeta格式错误: {}", e),
                     }
                 }
             }
@@ -170,7 +170,7 @@ pub fn scan_pack_directory(root_path: &Path) -> Result<PackInfo, String> {
         PackMeta {
             pack: PackMetaInfo {
                 pack_format: 34,
-                description: "⚠️ pack.mcmeta文件不存在".to_string(),
+                description: "️ pack.mcmeta文件不存在".to_string(),
             }
         }
     };

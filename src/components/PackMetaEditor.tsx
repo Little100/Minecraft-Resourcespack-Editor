@@ -32,12 +32,12 @@ const MINECRAFT_COLORS: { [key: string]: string } = {
   'f': '#FFFFFF', // 白色
 };
 
-const parseMinecraftText = (text: string): JSX.Element[] => {
+const parseMinecraftText = (text: string): React.ReactElement[] => {
   if (typeof text !== 'string') {
     return [<span key="0">{String(text)}</span>];
   }
 
-  const parts: JSX.Element[] = [];
+  const parts: React.ReactElement[] = [];
   let currentIndex = 0;
   let currentColor = '#FFFFFF';
   let isBold = false;
@@ -271,7 +271,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
   };
 
   // 删除历史记录
-  const deleteHistoryEntry = async (entry: any, index: number) => {
+  const deleteHistoryEntry = async (entry: any) => {
     try {
       const packDir = await invoke<string>('get_current_pack_path');
       await invoke('delete_file_history', {
@@ -863,7 +863,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
                           </button>
                           <button
                             className="btn-delete"
-                            onClick={() => deleteHistoryEntry(entry, index)}
+                            onClick={() => deleteHistoryEntry(entry)}
                             title="删除此历史记录"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

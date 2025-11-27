@@ -187,6 +187,28 @@ body.acrylic-enabled .color-input {
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem 0;
+  position: relative;
+}
+
+.tree-item.folder {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg-secondary);
+}
+
+.tree-item.folder.expanded {
+  z-index: 11;
+}
+
+[data-theme="dark"] .tree-item.folder {
+  background: var(--bg-secondary);
+}
+
+body.acrylic-enabled .tree-item.folder {
+  background: rgba(var(--bg-secondary-rgb), 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .tree-node {
@@ -1194,8 +1216,10 @@ body.acrylic-enabled .editor-tab.active {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.85);
   z-index: 9998;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .clear-history-dialog {

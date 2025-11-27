@@ -127,9 +127,28 @@
   color: white;
 }
 
+.titlebar-button.debug {
+  color: var(--text-secondary);
+}
+
+.titlebar-button.debug:hover {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+[data-theme="dark"] .titlebar-button.debug:hover {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
 .titlebar-button svg {
   width: 12px;
   height: 12px;
+}
+
+.titlebar-button.debug svg {
+  width: 20px;
+  height: 20px;
 }
 
 .app-container {

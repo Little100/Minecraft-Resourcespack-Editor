@@ -348,8 +348,15 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
   // 处理滚动同步
   const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;
+    const startTime = performance.now();
+    
     setScrollTop(target.scrollTop);
     setScrollLeft(target.scrollLeft);
+    
+    const duration = performance.now() - startTime;
+    if (duration > 16) {
+      console.log(`[性能-滚动] ️ 滚动处理耗时: ${duration.toFixed(2)}ms`);
+    }
   };
 
   // 格式化JSON
@@ -540,7 +547,16 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
         </div>
       </div>
       <div className="editor-container" ref={editorContainerRef}>
-        <div className="line-numbers" style={{ fontSize: `${fontSize}px` }}>
+        <div
+          className="line-numbers"
+          style={{
+            fontSize: `${fontSize}px`,
+            transform: `translateY(-${scrollTop}px)`,
+            willChange: 'transform',
+            height: `${lineCount * fontSize * 1.5 + 32}px`,
+            minHeight: '100%'
+          }}
+        >
           {lineNumbers.map((num) => (
             <div key={num} className="line-number" style={{ height: `${fontSize * 1.5}px` }}>
               {num}

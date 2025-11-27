@@ -1,6 +1,8 @@
-use image::{DynamicImage, ImageFormat, RgbaImage};
-use std::path::Path;
+use image::{DynamicImage, ImageFormat, RgbaImage, imageops::FilterType};
+use std::path::{Path, PathBuf};
 use base64::{Engine as _, engine::general_purpose};
+use std::io::BufReader;
+use std::fs::File;
 
 /// 读取图片并转换为base64
 pub fn image_to_base64(path: &Path) -> Result<String, String> {
@@ -60,22 +62,37 @@ pub fn create_thumbnail(
     path: &Path,
     max_size: u32,
 ) -> Result<String, String> {
-    let img = image::open(path)
+    let file = File::open(path)
         .map_err(|e| format!("Failed to open image: {}", e))?;
+    let reader = BufReader::with_capacity(8192, file);
+    
+    let img = image::load(reader, image::ImageFormat::from_path(path)
+        .map_err(|e| format!("Failed to detect image format: {}", e))?)
+        .map_err(|e| format!("Failed to decode image: {}", e))?;
     
     let (width, height) = (img.width(), img.height());
-    let scale = (max_size as f32 / width.max(height) as f32).min(1.0);
     
+    if width <= max_size && height <= max_size {
+        let mut buffer = Vec::with_capacity((width * height * 4) as usize);
+        img.write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode image: {}", e))?;
+        return Ok(general_purpose::STANDARD.encode(&buffer));
+    }
+    
+    let scale = (max_size as f32 / width.max(height) as f32).min(1.0);
     let new_width = (width as f32 * scale) as u32;
     let new_height = (height as f32 * scale) as u32;
     
-    let thumbnail = img.resize(
-        new_width,
-        new_height,
-        image::imageops::FilterType::Nearest,
-    );
+    let filter = if scale < 0.5 {
+        FilterType::Lanczos3
+    } else {
+        FilterType::Triangle
+    };
     
-    let mut buffer = Vec::new();
+    let thumbnail = img.resize(new_width, new_height, filter);
+    
+    // 预分配缓冲区
+    let mut buffer = Vec::with_capacity((new_width * new_height * 4) as usize);
     thumbnail.write_to(&mut std::io::Cursor::new(&mut buffer), ImageFormat::Png)
         .map_err(|e| format!("Failed to encode thumbnail: {}", e))?;
     
@@ -150,4 +167,39 @@ pub fn create_transparent_png(
         .map_err(|e| format!("Failed to save PNG: {}", e))?;
     
     Ok(())
+}
+
+pub async fn create_thumbnail_async(
+    path: PathBuf,
+    max_size: u32,
+) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    
+    rayon::spawn(move || {
+        let result = create_thumbnail(&path, max_size);
+        let _ = tx.send(result);
+    });
+    
+    rx.await
+        .map_err(|e| format!("Channel error: {}", e))?
+}
+
+pub async fn create_thumbnails_batch(
+    paths: Vec<PathBuf>,
+    max_size: u32,
+) -> Vec<Result<(String, String), String>> {
+    use rayon::prelude::*;
+    
+    let results: Vec<_> = paths
+        .par_iter()
+        .map(|path| {
+            let path_str = path.to_string_lossy().to_string();
+            match create_thumbnail(path, max_size) {
+                Ok(data) => Ok((path_str, data)),
+                Err(e) => Err(format!("{}: {}", path_str, e)),
+            }
+        })
+        .collect();
+    
+    results
 }

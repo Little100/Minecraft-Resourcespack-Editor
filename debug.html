@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Debug Console</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .debug-header {
+      background: #252526;
+      border-bottom: 1px solid #3e3e42;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .debug-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #cccccc;
+    }
+
+    .debug-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .debug-btn {
+      padding: 6px 12px;
+      background: #0e639c;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+
+    .debug-btn:hover {
+      background: #1177bb;
+    }
+
+    .debug-btn.secondary {
+      background: #3e3e42;
+    }
+
+    .debug-btn.secondary:hover {
+      background: #505050;
+    }
+
+    .debug-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    .log-entry {
+      padding: 8px 12px;
+      margin-bottom: 4px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      background: #252526;
+      border-left: 3px solid transparent;
+    }
+
+    .log-entry.info {
+      border-left-color: #0e639c;
+    }
+
+    .log-entry.success {
+      border-left-color: #4ec9b0;
+    }
+
+    .log-entry.warning {
+      border-left-color: #dcdcaa;
+    }
+
+    .log-entry.error {
+      border-left-color: #f48771;
+    }
+
+    .log-timestamp {
+      color: #858585;
+      margin-right: 8px;
+    }
+
+    .log-level {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-right: 8px;
+    }
+
+    .log-level.info {
+      background: #0e639c;
+      color: white;
+    }
+
+    .log-level.success {
+      background: #4ec9b0;
+      color: #1e1e1e;
+    }
+
+    .log-level.warning {
+      background: #dcdcaa;
+      color: #1e1e1e;
+    }
+
+    .log-level.error {
+      background: #f48771;
+      color: white;
+    }
+
+    .log-message {
+      color: #d4d4d4;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      background: #252526;
+      padding: 12px;
+      border-radius: 6px;
+      border: 1px solid #3e3e42;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #858585;
+      margin-bottom: 4px;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: #4ec9b0;
+      font-family: 'Consolas', 'Monaco', monospace;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #858585;
+    }
+
+    .actions-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 0 4px;
+    }
+
+    .actions-bar .debug-btn {
+      flex: 1;
+    }
+
+    ::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e1e1e;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #424242;
+      border-radius: 5px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4e4e4e;
+    }
+  </style>
+</head>
+<body>
+  <div class="debug-header">
+    <div class="debug-title">Debug Console</div>
+    <div class="debug-controls">
+      <button class="debug-btn secondary" onclick="refreshLogs()">刷新</button>
+      <button class="debug-btn secondary" onclick="clearLogs()">清空</button>
+    </div>
+  </div>
+
+  <div class="debug-content">
+    <div class="stats-grid" id="stats-grid">
+    </div>
+    
+    <div class="actions-bar">
+      <button class="debug-btn" onclick="openLogsFolder()">📁 打开日志文件夹</button>
+    </div>
+    
+    <div id="log-container">
+      <div class="empty-state">正在加载日志...</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { invoke } from '@tauri-apps/api/core';
+
+    let logs = [];
+    let gpuInfo = '正在获取...';
+
+    async function getGPUInfo() {
+      try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+          return 'WebGL不支持';
+        }
+        
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+          const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+          return `${vendor} - ${renderer}`;
+        }
+        
+        return 'GPU信息不可用';
+      } catch (e) {
+        return '获取GPU信息失败';
+      }
+    }
+
+    // 格式化时间
+    function formatTime(date) {
+      return date.toLocaleTimeString('zh-CN', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    }
+
+    // 添加日志
+    function addLog(level, message) {
+      const timestamp = new Date();
+      logs.push({ level, message, timestamp });
+      renderLogs();
+    }
+
+    // 渲染日志
+    function renderLogs() {
+      const container = document.getElementById('log-container');
+      
+      if (logs.length === 0) {
+        container.innerHTML = '<div class="empty-state">暂无日志</div>';
+        return;
+      }
+
+      container.innerHTML = logs.map(log => `
+        <div class="log-entry ${log.level}">
+          <span class="log-timestamp">${formatTime(log.timestamp)}</span>
+          <span class="log-level ${log.level}">${log.level.toUpperCase()}</span>
+          <span class="log-message">${log.message}</span>
+        </div>
+      `).join('');
+
+      // 自动滚动到底部
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // 刷新日志
+    window.refreshLogs = async function() {
+      try {
+        const debugInfo = await invoke('get_debug_info');
+        
+        // 获取GPU信息
+        if (gpuInfo === '正在获取...') {
+          gpuInfo = await getGPUInfo();
+        }
+        
+        // 更新统计信息
+        const statsGrid = document.getElementById('stats-grid');
+        statsGrid.innerHTML = `
+          <div class="stat-card">
+            <div class="stat-label">CPU核心数</div>
+            <div class="stat-value">${debugInfo.cpu_cores || 'N/A'}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">GPU</div>
+            <div class="stat-value" style="font-size: 12px; word-break: break-word;">${gpuInfo}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">缓存文件数</div>
+            <div class="stat-value">${debugInfo.cached_files || 0}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">预加载吞吐量</div>
+            <div class="stat-value">${debugInfo.throughput || 'N/A'}</div>
+          </div>
+        `;
+
+        // 清空旧日志，显示新日志
+        logs = [];
+        if (debugInfo.logs && debugInfo.logs.length > 0) {
+          debugInfo.logs.forEach(log => {
+            addLog(log.level || 'info', log.message);
+          });
+        }
+      } catch (error) {
+        addLog('error', `获取调试信息失败: ${error}`);
+      }
+    };
+
+    // 清空日志
+    window.clearLogs = function() {
+      logs = [];
+      renderLogs();
+      addLog('info', '日志已清空');
+    };
+
+    // 打开日志文件夹
+    window.openLogsFolder = async function() {
+      try {
+        await invoke('open_logs_folder');
+        addLog('success', '已打开日志文件夹');
+      } catch (error) {
+        addLog('error', `打开日志文件夹失败: ${error}`);
+      }
+    };
+
+    // 初始化
+    addLog('info', 'Debug Console 已启动');
+    addLog('info', '正在获取系统信息...');
+    
+    // 自动刷新
+    refreshLogs();
+    setInterval(refreshLogs, 5000); // 5秒刷新一次
+  </script>
+</body>
+</html>

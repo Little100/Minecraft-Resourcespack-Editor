@@ -1,6 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./ImageViewer.css";
+import { imageCache } from "../utils/image-cache";
+import { readFileBinary } from "../utils/tauri-api";
+import {
+  createGPUContext,
+  enableCanvasAcceleration,
+  checkGPUSupport,
+  getGPUInfo,
+  BatchDrawOptimizer
+} from "../utils/gpu-canvas";
+import { testCanvasGPUAcceleration, generateGPUReport } from "../utils/gpu-test";
 
 interface ImageViewerProps {
   imagePath: string;
@@ -12,6 +22,7 @@ interface ImageViewerProps {
   onHasChanges?: (hasChanges: boolean) => void;
   savedCanvasData?: string | null;
   onSaveCanvasData?: (data: string) => void;
+  onImageLoad?: (info: { width: number; height: number }) => void;
 }
 
 export default function ImageViewer({
@@ -23,7 +34,8 @@ export default function ImageViewer({
   onColorPick,
   onHasChanges,
   savedCanvasData,
-  onSaveCanvasData
+  onSaveCanvasData,
+  onImageLoad
 }: ImageViewerProps) {
   const [zoom, setZoom] = useState(100);
   const [error, setError] = useState(false);
@@ -44,6 +56,10 @@ export default function ImageViewer({
   const [hasChanges, setHasChanges] = useState(false);
   const toolSize = externalToolSize;
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
+  const pendingDrawOps = useRef<Array<{x: number, y: number, tool: string}>>([]);
+  const drawAnimationFrame = useRef<number | null>(null);
+  const batchOptimizer = useRef<BatchDrawOptimizer>(new BatchDrawOptimizer());
+  const gpuInfoRef = useRef<string>('');
   const [history, setHistory] = useState<ImageData[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showHistoryList, setShowHistoryList] = useState(false);
@@ -84,57 +100,50 @@ export default function ImageViewer({
     return { width: w, height: h };
   })();
 
-  useEffect(() => {
-    if (!contentRef.current || imageSize.width === 0 || imageSize.height === 0) return;
-    
+  // 使用useMemo缓存计算结果,减少不必要的重新计算
+  const needMinimap = useMemo(() => {
+    if (!contentRef.current || imageSize.width === 0 || imageSize.height === 0) return false;
     const container = contentRef.current;
     const zoomScale = zoom / 100;
-    
     const viewportW = container.clientWidth / zoomScale;
     const viewportH = container.clientHeight / zoomScale;
-    
-    // 如果视口小于图片尺寸显示鸟瞰图
-    const needMinimap = viewportW < imageSize.width || viewportH < imageSize.height;
-    console.log('[鸟瞰图自动控制]', {
-      needMinimap,
-      showMinimap,
-      isMinimapClosing,
-      isMinimapManuallyHidden,
-      viewportW,
-      viewportH,
-      imageWidth: imageSize.width,
-      imageHeight: imageSize.height,
-      zoom
-    });
-    
+    return viewportW < imageSize.width || viewportH < imageSize.height;
+  }, [imageSize.width, imageSize.height, zoom]);
+
+  useEffect(() => {
     if (!needMinimap && showMinimap && !isMinimapClosing) {
       handleMinimapClose(false);
     } else if (needMinimap && !showMinimap && !isMinimapClosing && !isMinimapManuallyHidden) {
       setShowMinimap(true);
     }
-  }, [imageSize.width, imageSize.height, zoom, showMinimap]);
+  }, [needMinimap, showMinimap, isMinimapClosing, isMinimapManuallyHidden]);
 
-  useEffect(() => {
-    if (showMinimap && minimapCanvasRef.current && canvasRef.current && minimapSize.width > 0) {
-      const minimap = minimapCanvasRef.current;
-      const source = canvasRef.current;
-      const drawing = drawingCanvasRef.current;
-      
-      minimap.width = minimapSize.width;
-      minimap.height = minimapSize.height;
-      
-      const ctx = minimap.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, minimap.width, minimap.height);
-        // 绘制底图
-        ctx.drawImage(source, 0, 0, minimap.width, minimap.height);
-        // 绘制绘图层
-        if (drawing) {
-           ctx.drawImage(drawing, 0, 0, minimap.width, minimap.height);
-        }
+  // 使用useCallback优化鸟瞰图更新函数
+  const updateMinimap = useCallback(() => {
+    if (!showMinimap || !minimapCanvasRef.current || !canvasRef.current || minimapSize.width === 0) return;
+    
+    const minimap = minimapCanvasRef.current;
+    const source = canvasRef.current;
+    const drawing = drawingCanvasRef.current;
+    
+    minimap.width = minimapSize.width;
+    minimap.height = minimapSize.height;
+    
+    const ctx = minimap.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, minimap.width, minimap.height);
+      ctx.drawImage(source, 0, 0, minimap.width, minimap.height);
+      if (drawing) {
+        ctx.drawImage(drawing, 0, 0, minimap.width, minimap.height);
       }
     }
-  }, [showMinimap, imageSize.width, imageSize.height, minimapSize.width, minimapSize.height, historyIndex, hasChanges]);
+  }, [showMinimap, minimapSize.width, minimapSize.height]);
+
+  // 使用防抖减少鸟瞰图更新频率
+  useEffect(() => {
+    const timer = setTimeout(updateMinimap, 100);
+    return () => clearTimeout(timer);
+  }, [updateMinimap, historyIndex, hasChanges]);
 
   // 初始化
   useEffect(() => {
@@ -144,6 +153,13 @@ export default function ImageViewer({
       const drawingCanvas = drawingCanvasRef.current;
       const previewCanvas = previewCanvasRef.current;
       
+      // 检查GPU支持
+      const gpuSupport = checkGPUSupport();
+      gpuInfoRef.current = getGPUInfo();
+      console.log('[GPU加速] 支持情况:', gpuSupport);
+      console.log('[GPU加速] GPU信息:', gpuInfoRef.current);
+      
+      // 保持原始分辨率
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
       drawingCanvas.width = img.naturalWidth;
@@ -151,8 +167,26 @@ export default function ImageViewer({
       previewCanvas.width = img.naturalWidth;
       previewCanvas.height = img.naturalHeight;
       
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      console.log(`[性能-GPU] 原始分辨率渲染: ${img.naturalWidth}x${img.naturalHeight}`);
+      
+      // 启用Canvas硬件加速
+      enableCanvasAcceleration(canvas);
+      enableCanvasAcceleration(drawingCanvas);
+      enableCanvasAcceleration(previewCanvas);
+      
+      setTimeout(() => {
+        console.log('\n' + generateGPUReport(drawingCanvas));
+        const test = testCanvasGPUAcceleration(drawingCanvas);
+        if (!test.isAccelerated) {
+          console.warn('️ GPU加速未完全启用,性能可能受限');
+        }
+      }, 100);
+      
+      const ctx = createGPUContext(canvas);
+      
       if (ctx) {
+        ctx.imageSmoothingEnabled = false;
+        
         ctx.drawImage(img, 0, 0);
       }
       
@@ -179,42 +213,94 @@ export default function ImageViewer({
       }
     };
   }, []);
-
-  useEffect(() => {
-    const loadImage = async () => {
-      try {
-        // 重置初始缩放标志
-        setInitialZoomSet(false);
-        
-        if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) {
-          setImageSrc(imagePath);
-          return;
-        }
-        
-        const base64 = await invoke<string>('get_image_thumbnail', {
-          imagePath: imagePath,
-          maxSize: 2048
-        });
-        
-        const imageSrc = base64.startsWith('data:')
-          ? base64
-          : `data:image/png;base64,${base64}`;
-        
-        setImageSrc(imageSrc);
-        
-        const img = new Image();
-        img.onload = () => {
-          setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
-        };
-        img.src = imageSrc;
-      } catch (err) {
-        console.error('加载图片失败:', err);
-        setError(true);
-      }
-    };
+useEffect(() => {
+const loadImage = async () => {
+  console.log(`[性能-图片]  开始加载: ${imagePath}`);
+  const startTime = performance.now();
+  
+  try {
+    setInitialZoomSet(false);
     
-    loadImage();
-  }, [imagePath]);
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) {
+      setImageSrc(imagePath);
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[性能-图片]  直接URL加载! 耗时: ${duration}ms`);
+      return;
+    }
+    
+    // 检查缓存
+    const cacheCheckStart = performance.now();
+    const cachedImage = imageCache.get(imagePath);
+    const cacheCheckDuration = (performance.now() - cacheCheckStart).toFixed(2);
+    
+    if (cachedImage) {
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[性能-图片] 🎯 从缓存加载!`);
+      console.log(`  ├─ 缓存查询耗时: ${cacheCheckDuration}ms`);
+      console.log(`  └─ 总耗时: ${duration}ms`);
+      setImageSrc(cachedImage);
+      
+      const img = new Image();
+      img.onload = () => {
+        const size = { width: img.naturalWidth, height: img.naturalHeight };
+        setImageSize(size);
+        if (onImageLoad) onImageLoad(size);
+      };
+      img.src = cachedImage;
+      return;
+    }
+    
+    console.log(`[性能-图片]   缓存未命中，开始读取文件...`);
+    
+    const readStart = performance.now();
+    const binaryData = await readFileBinary(imagePath);
+    const readDuration = (performance.now() - readStart).toFixed(2);
+    console.log(`[性能-图片]   ├─ Tauri读取耗时: ${readDuration}ms`);
+    
+    // 创建 Blob
+    const blobStart = performance.now();
+    const uint8Array = new Uint8Array(binaryData);
+    const blob = new Blob([uint8Array], { type: 'image/png' });
+    const objectUrl = URL.createObjectURL(blob);
+    const blobDuration = (performance.now() - blobStart).toFixed(2);
+    console.log(`[性能-图片]   ├─ Blob创建耗时: ${blobDuration}ms`);
+    
+    // 转换为 Base64并缓存
+    const base64Start = performance.now();
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Duration = (performance.now() - base64Start).toFixed(2);
+      console.log(`[性能-图片]   ├─ Base64转换耗时: ${base64Duration}ms`);
+      
+      const base64data = reader.result as string;
+      imageCache.set(imagePath, base64data);
+      setImageSrc(base64data);
+      
+      const img = new Image();
+      img.onload = () => {
+        const size = { width: img.naturalWidth, height: img.naturalHeight };
+        setImageSize(size);
+        if (onImageLoad) onImageLoad(size);
+        URL.revokeObjectURL(objectUrl);
+        
+        const totalDuration = (performance.now() - startTime).toFixed(2);
+        console.log(`[性能-图片]  加载完成!`);
+        console.log(`  ├─ 图片尺寸: ${size.width}x${size.height}`);
+        console.log(`  └─ 总耗时: ${totalDuration}ms`);
+      };
+      img.src = base64data;
+    };
+    reader.readAsDataURL(blob);
+    
+  } catch (err) {
+    const duration = (performance.now() - startTime).toFixed(2);
+    console.error(`[性能-图片]  加载失败! 耗时: ${duration}ms`, err);
+    setError(true);
+  }
+};
+
+loadImage();
+}, [imagePath]);
   
   // 自适应缩放
   useEffect(() => {
@@ -235,7 +321,7 @@ export default function ImageViewer({
       // 如果图片太大自动缩小
       if (scale < 1) {
         const newZoom = Math.floor(scale * 100);
-        setZoom(Math.max(newZoom, 25));
+        setZoom(Math.max(newZoom, 1));
         setPosition({ x: 0, y: 0 });
       } else {
         setZoom(100);
@@ -246,17 +332,27 @@ export default function ImageViewer({
     }
   }, [imageSize, initialZoomSet]);
 
-  // 鼠标滚轮缩放
+  // 鼠标滚轮缩放 
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (contentRef.current && contentRef.current.contains(e.target as Node)) {
         e.preventDefault();
         
-        const delta = e.deltaY > 0 ? -10 : 10;
+        // 根据键决定缩放幅度
+        let delta: number;
+        if (e.ctrlKey) {
+          // Ctrl + 滚轮 = 大缩放
+          delta = e.deltaY > 0 ? -50 : 50;
+        } else if (e.shiftKey) {
+          // Shift + 滚轮 = 小缩放
+          delta = e.deltaY > 0 ? -5 : 5;
+        } else {
+          delta = e.deltaY > 0 ? -10 : 10;
+        }
         
         setZoom((prev) => {
           const newZoom = prev + delta;
-          return Math.min(Math.max(newZoom, 25), 3000);
+          return Math.min(Math.max(newZoom, 1), 5000);
         });
       }
     };
@@ -274,11 +370,11 @@ export default function ImageViewer({
   }, []);
 
   const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev + 25, 3000));
+    setZoom((prev) => Math.min(prev + 25, 5000));
   };
 
   const handleZoomOut = () => {
-    setZoom((prev) => Math.max(prev - 25, 25));
+    setZoom((prev) => Math.max(prev - 25, 1));
   };
 
   const handleReset = () => {
@@ -297,31 +393,38 @@ export default function ImageViewer({
     };
   };
 
-  const drawBrush = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    const color = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${selectedColor.a / 100})`;
+  const drawBrush = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    // 使用设置的透明度
+    const alpha = selectedColor.a / 100;
+    const centerColor = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${alpha})`;
+    const edgeColor = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, 0)`;
     
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, toolSize / 2);
-    gradient.addColorStop(0, color);
-    gradient.addColorStop(0.7, color.replace(/[\d.]+\)$/g, `${selectedColor.a / 200})`));
-    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    gradient.addColorStop(0, centerColor);
+    gradient.addColorStop(0.3, centerColor);
+    gradient.addColorStop(0.7, `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${alpha * 0.5})`);
+    gradient.addColorStop(1, edgeColor);
     
     ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(x, y, toolSize / 2, 0, Math.PI * 2);
     ctx.fill();
-  };
+  }, [selectedColor, toolSize]);
 
-  const drawPencil = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
-    const color = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${selectedColor.a / 100})`;
-    ctx.fillStyle = color;
+  const drawPencil = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number) => {
+    // 应用设置的透明度
+    const alpha = selectedColor.a / 100;
+    ctx.fillStyle = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${alpha})`;
     
     const halfSize = Math.floor(toolSize / 2);
     ctx.fillRect(Math.floor(x - halfSize), Math.floor(y - halfSize), toolSize, toolSize);
-  };
+  }, [selectedColor, toolSize]);
 
+  // 优化的线条绘制 
   const drawLine = (ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, drawFunc: (ctx: CanvasRenderingContext2D, x: number, y: number) => void) => {
     const distance = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-    const steps = Math.max(Math.ceil(distance / 2), 1);
+    const pixelStep = Math.max(1, toolSize / 4);
+    const steps = Math.max(Math.ceil(distance / pixelStep), 1);
     
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
@@ -331,7 +434,7 @@ export default function ImageViewer({
     }
   };
 
-  const erase = (ctx: CanvasRenderingContext2D, x: number, y: number) => {
+  const erase = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number) => {
     ctx.clearRect(x - toolSize / 2, y - toolSize / 2, toolSize, toolSize);
     
     if (canvasRef.current) {
@@ -340,13 +443,16 @@ export default function ImageViewer({
         baseCtx.clearRect(x - toolSize / 2, y - toolSize / 2, toolSize, toolSize);
       }
     }
-  };
+  }, [toolSize]);
 
   const magicWandSelect = (x: number, y: number, tolerance: number = 30) => {
     if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const ctx = canvas.getContext('2d', {
+      willReadFrequently: true,
+      alpha: true
+    });
     if (!ctx) return;
     
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -519,12 +625,21 @@ export default function ImageViewer({
   };
 
   const pickColor = (x: number, y: number) => {
-    if (!canvasRef.current) return;
+    if (!canvasRef.current || !drawingCanvasRef.current) return;
     
-    const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvasRef.current.width;
+    tempCanvas.height = canvasRef.current.height;
+    const tempCtx = tempCanvas.getContext('2d', {
+      willReadFrequently: true,
+      alpha: true
+    });
+    if (!tempCtx) return;
     
-    const imageData = ctx.getImageData(x, y, 1, 1);
+    tempCtx.drawImage(canvasRef.current, 0, 0);
+    tempCtx.drawImage(drawingCanvasRef.current, 0, 0);
+    
+    const imageData = tempCtx.getImageData(Math.floor(x), Math.floor(y), 1, 1);
     const [r, g, b, a] = imageData.data;
     
     if (onColorPick) {
@@ -600,7 +715,10 @@ export default function ImageViewer({
   const saveHistory = () => {
     if (!drawingCanvasRef.current) return;
     
-    const ctx = drawingCanvasRef.current.getContext('2d', { willReadFrequently: true });
+    const ctx = drawingCanvasRef.current.getContext('2d', {
+      willReadFrequently: true,
+      alpha: true
+    });
     if (!ctx) return;
     
     const imageData = ctx.getImageData(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
@@ -730,24 +848,36 @@ export default function ImageViewer({
     }
   };
 
-  // 更新预览
-  const updatePreview = (x: number, y: number) => {
+  const updatePreview = useCallback((x: number, y: number) => {
     if (!previewCanvasRef.current || !canvasRef.current) return;
     
     const previewCanvas = previewCanvasRef.current;
     const ctx = previewCanvas.getContext('2d');
     if (!ctx) return;
     
-    // 清空预览层
     ctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    
     drawSelection();
     
-    if (selectedTool === 'brush' || selectedTool === 'pencil' || selectedTool === 'eraser') {
-      const r = selectedTool === 'eraser' ? 255 : selectedColor.r;
-      const g = selectedTool === 'eraser' ? 0 : selectedColor.g;
-      const b = selectedTool === 'eraser' ? 0 : selectedColor.b;
-
+    if (selectedTool === 'eraser') {
+      const halfSize = Math.floor(toolSize / 2);
+      const drawX = Math.floor(x - halfSize);
+      const drawY = Math.floor(y - halfSize);
+      
+      for (let py = 0; py < toolSize; py++) {
+        for (let px = 0; px < toolSize; px++) {
+          const absX = drawX + px;
+          const absY = drawY + py;
+          const isLight = ((absX + absY) % 2) === 0;
+          ctx.fillStyle = isLight ? '#CCCCCC' : '#999999';
+          ctx.fillRect(absX, absY, 1, 1);
+        }
+      }
+      
+      // 绘制浅色方形边框
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(drawX + 0.5, drawY + 0.5, toolSize - 1, toolSize - 1);
+    } else if (selectedTool === 'brush' || selectedTool === 'pencil') {
       ctx.lineWidth = 1;
       
       if (selectedTool === 'pencil') {
@@ -755,31 +885,209 @@ export default function ImageViewer({
         const drawX = Math.floor(x - halfSize);
         const drawY = Math.floor(y - halfSize);
         
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.5)`;
+        ctx.fillStyle = `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`;
         ctx.fillRect(drawX, drawY, toolSize, toolSize);
         
         if (toolSize > 2) {
-          ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+          ctx.strokeStyle = `rgb(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b})`;
           ctx.strokeRect(drawX + 0.5, drawY + 0.5, toolSize - 1, toolSize - 1);
         }
       } else {
-        const alpha = selectedTool === 'eraser' ? 1 : selectedColor.a / 100;
+        const alpha = selectedColor.a / 100;
+        const centerColor = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${alpha})`;
+        const edgeColor = `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, 0)`;
         
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, toolSize / 2);
-        gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
-        gradient.addColorStop(0.7, `rgba(${r}, ${g}, ${b}, ${alpha / 2})`);
-        gradient.addColorStop(1, 'rgba(0,0,0,0)');
+        gradient.addColorStop(0, centerColor);
+        gradient.addColorStop(0.3, centerColor);
+        gradient.addColorStop(0.7, `rgba(${selectedColor.r}, ${selectedColor.g}, ${selectedColor.b}, ${alpha * 0.5})`);
+        gradient.addColorStop(1, edgeColor);
         
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(x, y, toolSize / 2, 0, Math.PI * 2);
         ctx.fill();
-        
-        ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
-        ctx.stroke();
       }
     }
-  };
+  }, [selectedTool, selectedColor, toolSize]);
+  const processPendingDrawOps = useCallback(() => {
+    if (pendingDrawOps.current.length === 0 || !drawingCanvasRef.current) {
+      drawAnimationFrame.current = null;
+      return;
+    }
+    
+    const canvas = drawingCanvasRef.current;
+    const ctx = createGPUContext(canvas);
+    if (!ctx) return;
+    
+    const startTime = performance.now();
+    const ops = [...pendingDrawOps.current];
+    pendingDrawOps.current = [];
+    
+    const isLargeImage = canvas.width > 4096 || canvas.height > 4096;
+    console.log(`[性能-GPU绘制]  开始处理 ${ops.length} 个操作 ${isLargeImage ? '(大图片模式)' : ''}`);
+    console.log(`[性能-GPU绘制]  GPU: ${gpuInfoRef.current}`);
+    
+    ctx.globalCompositeOperation = 'source-over';
+    
+    if (isLargeImage && ops.length > 5000) {
+      const targetOps = 1500;
+      const sampleRate = Math.max(1, Math.floor(ops.length / targetOps));
+      
+      const sampledOps = [ops[0]];
+      for (let i = sampleRate; i < ops.length - 1; i += sampleRate) {
+        sampledOps.push(ops[i]);
+      }
+      if (ops.length > 1) {
+        sampledOps.push(ops[ops.length - 1]);
+      }
+      
+      console.log(`[性能-GPU绘制] 智能降采样: ${ops.length} -> ${sampledOps.length} (采样率: 1/${sampleRate})`);
+      
+      ctx.save();
+      // 使用优化的插值算法保持平滑
+      for (let i = 0; i < sampledOps.length; i++) {
+        const op = sampledOps[i];
+        const canDraw = !selectionMask ||
+          (op.y >= 0 && op.y < selectionMask.length &&
+           op.x >= 0 && op.x < selectionMask[0].length &&
+           selectionMask[Math.floor(op.y)][Math.floor(op.x)]);
+        
+        if (canDraw) {
+          if (i > 0) {
+            // 在采样点之间插值保持平滑和像素连续性
+            const prevOp = sampledOps[i - 1];
+            const distance = Math.sqrt((op.x - prevOp.x) ** 2 + (op.y - prevOp.y) ** 2);
+            
+            // 根据工具大小动态调整插值密度
+            const pixelStep = Math.max(toolSize / 3, 2);
+            const steps = Math.max(1, Math.ceil(distance / pixelStep));
+            
+            for (let j = 0; j <= steps; j++) {
+              const t = j / steps;
+              const x = prevOp.x + (op.x - prevOp.x) * t;
+              const y = prevOp.y + (op.y - prevOp.y) * t;
+              
+              if (op.tool === 'brush') {
+                drawBrush(ctx, x, y);
+              } else if (op.tool === 'pencil') {
+                drawPencil(ctx, x, y);
+              } else if (op.tool === 'eraser') {
+                erase(ctx, x, y);
+              }
+            }
+          } else {
+            // 第一个点直接绘制
+            if (op.tool === 'brush') {
+              drawBrush(ctx, op.x, op.y);
+            } else if (op.tool === 'pencil') {
+              drawPencil(ctx, op.x, op.y);
+            } else if (op.tool === 'eraser') {
+              erase(ctx, op.x, op.y);
+            }
+          }
+        }
+      }
+      ctx.restore();
+    } else {
+      ctx.save();
+      
+      // 如果操作数很少操作之间也进行插值
+      if (ops.length < 100) {
+        for (let i = 0; i < ops.length; i++) {
+          const op = ops[i];
+          
+          if (i > 0) {
+            // 在相邻操作之间超密集插值
+            const prevOp = ops[i - 1];
+            const distance = Math.sqrt((op.x - prevOp.x) ** 2 + (op.y - prevOp.y) ** 2);
+            // 使用极小的步长确保完全连续
+            const pixelStep = Math.max(toolSize / 10, 0.3);
+            const steps = Math.max(1, Math.ceil(distance / pixelStep));
+            
+            for (let j = 0; j <= steps; j++) {
+              const t = j / steps;
+              const x = prevOp.x + (op.x - prevOp.x) * t;
+              const y = prevOp.y + (op.y - prevOp.y) * t;
+              
+              const canDraw = !selectionMask ||
+                (y >= 0 && y < selectionMask.length &&
+                 x >= 0 && x < selectionMask[0].length &&
+                 selectionMask[Math.floor(y)][Math.floor(x)]);
+              
+              if (canDraw) {
+                if (op.tool === 'brush') {
+                  drawBrush(ctx, x, y);
+                } else if (op.tool === 'pencil') {
+                  drawPencil(ctx, x, y);
+                } else if (op.tool === 'eraser') {
+                  erase(ctx, x, y);
+                }
+              }
+            }
+          } else {
+            // 第一个点直接绘制
+            const canDraw = !selectionMask ||
+              (op.y >= 0 && op.y < selectionMask.length &&
+               op.x >= 0 && op.x < selectionMask[0].length &&
+               selectionMask[Math.floor(op.y)][Math.floor(op.x)]);
+            
+            if (canDraw) {
+              if (op.tool === 'brush') {
+                drawBrush(ctx, op.x, op.y);
+              } else if (op.tool === 'pencil') {
+                drawPencil(ctx, op.x, op.y);
+              } else if (op.tool === 'eraser') {
+                erase(ctx, op.x, op.y);
+              }
+            }
+          }
+        }
+      } else {
+        // 操作数较多时,直接绘制
+        for (const op of ops) {
+          const canDraw = !selectionMask ||
+            (op.y >= 0 && op.y < selectionMask.length &&
+             op.x >= 0 && op.x < selectionMask[0].length &&
+             selectionMask[Math.floor(op.y)][Math.floor(op.x)]);
+          
+          if (canDraw) {
+            if (op.tool === 'brush') {
+              drawBrush(ctx, op.x, op.y);
+            } else if (op.tool === 'pencil') {
+              drawPencil(ctx, op.x, op.y);
+            } else if (op.tool === 'eraser') {
+              erase(ctx, op.x, op.y);
+            }
+          }
+        }
+      }
+      
+      ctx.restore();
+    }
+    
+    const duration = performance.now() - startTime;
+    const avgTime = ops.length > 0 ? (duration / ops.length).toFixed(3) : '0.000';
+    
+    const attrs = ctx.getContextAttributes();
+    const gpuEnabled = attrs?.desynchronized ||
+                       (canvas.style.willChange === 'transform, contents') ||
+                       (canvas.style.transform.includes('translateZ'));
+    
+    console.log(`[性能-GPU绘制]  完成! 耗时: ${duration.toFixed(2)}ms, 平均: ${avgTime}ms/op, GPU加速: ${gpuEnabled ? '是' : '否'}`);
+    
+    drawAnimationFrame.current = null;
+  }, [selectionMask, selectedColor, drawBrush, drawPencil, erase]);
+  
+  const queueDrawOp = useCallback((x: number, y: number, tool: string) => {
+    pendingDrawOps.current.push({ x, y, tool });
+    
+    if (drawAnimationFrame.current === null) {
+      drawAnimationFrame.current = requestAnimationFrame(() => {
+        processPendingDrawOps();
+      });
+    }
+  }, [processPendingDrawOps]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button === 2 && selectedTool === 'selection') {
@@ -836,38 +1144,36 @@ export default function ImageViewer({
         }
         return;
       }
-
       if (selectedTool === 'brush' || selectedTool === 'pencil' || selectedTool === 'eraser') {
         setIsDrawing(true);
         setLastPoint(coords);
-        
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const canDraw = !selectionMask ||
-            (coords.y >= 0 && coords.y < selectionMask.length &&
-             coords.x >= 0 && coords.x < selectionMask[0].length &&
-             selectionMask[Math.floor(coords.y)][Math.floor(coords.x)]);
-          
-          if (canDraw) {
-            if (selectedTool === 'brush') {
-              drawBrush(ctx, coords.x, coords.y);
-            } else if (selectedTool === 'pencil') {
-              drawPencil(ctx, coords.x, coords.y);
-            } else if (selectedTool === 'eraser') {
-              erase(ctx, coords.x, coords.y);
-            }
-            setHasChanges(true);
-          }
-        }
+        setHasChanges(true);
       }
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging) {
+      if (!contentRef.current) return;
+      
+      const container = contentRef.current;
+      const zoomScale = zoom / 100;
+      
+      const displayWidth = imageSize.width * zoomScale;
+      const displayHeight = imageSize.height * zoomScale;
+      
+      const newX = e.clientX - dragStart.x;
+      const newY = e.clientY - dragStart.y;
+      
+      const minVisibleSize = Math.min(displayWidth, displayHeight, 200);
+      const maxX = container.clientWidth - minVisibleSize;
+      const minX = -(displayWidth - minVisibleSize);
+      const maxY = container.clientHeight - minVisibleSize;
+      const minY = -(displayHeight - minVisibleSize);
+      
       setPosition({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y
+        x: Math.max(minX, Math.min(maxX, newX)),
+        y: Math.max(minY, Math.min(maxY, newY))
       });
       return;
     }
@@ -881,29 +1187,37 @@ export default function ImageViewer({
         return;
       }
     }
-
-    if (isDrawing && drawingCanvasRef.current && lastPoint) {
+    if (isDrawing && drawingCanvasRef.current) {
       const canvas = drawingCanvasRef.current;
       const coords = getCanvasCoordinates(e, canvas);
-      const ctx = canvas.getContext('2d');
       
-      if (ctx) {
-        const canDraw = !selectionMask ||
-          (coords.y >= 0 && coords.y < selectionMask.length &&
-           coords.x >= 0 && coords.x < selectionMask[0].length &&
-           selectionMask[Math.floor(coords.y)][Math.floor(coords.x)]);
+      if (selectedTool) {
+        const isLargeImage = canvas.width > 4096 || canvas.height > 4096;
         
-        if (canDraw) {
-          if (selectedTool === 'brush') {
-            drawLine(ctx, lastPoint.x, lastPoint.y, coords.x, coords.y, drawBrush);
-          } else if (selectedTool === 'pencil') {
-            drawLine(ctx, lastPoint.x, lastPoint.y, coords.x, coords.y, drawPencil);
-          } else if (selectedTool === 'eraser') {
-            drawLine(ctx, lastPoint.x, lastPoint.y, coords.x, coords.y, erase);
+        if (lastPoint) {
+          const distance = Math.sqrt((coords.x - lastPoint.x) ** 2 + (coords.y - lastPoint.y) ** 2);
+          
+          let stepSize: number;
+          if (isLargeImage) {
+            stepSize = Math.max(toolSize / 6, 1);
+          } else {
+            stepSize = Math.max(toolSize / 10, 0.25);
           }
+          
+          const steps = Math.max(Math.ceil(distance / stepSize), 1);
+          
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const x = lastPoint.x + (coords.x - lastPoint.x) * t;
+            const y = lastPoint.y + (coords.y - lastPoint.y) * t;
+            queueDrawOp(x, y, selectedTool);
+          }
+        } else {
+          queueDrawOp(coords.x, coords.y, selectedTool);
         }
-        setLastPoint(coords);
       }
+      
+      setLastPoint(coords);
     }
     
     // 更新预览
@@ -944,6 +1258,11 @@ export default function ImageViewer({
     }
     
     if (isDrawing) {
+      // 确保所有待处理的绘制操作完成
+      if (drawAnimationFrame.current !== null) {
+        clearTimeout(drawAnimationFrame.current as any);
+        processPendingDrawOps();
+      }
       saveHistory();
     }
     setIsDragging(false);
@@ -959,6 +1278,10 @@ export default function ImageViewer({
     }
     
     if (isDrawing) {
+      if (drawAnimationFrame.current !== null) {
+        clearTimeout(drawAnimationFrame.current as any);
+        processPendingDrawOps();
+      }
       saveHistory();
     }
     setIsDragging(false);
@@ -1012,7 +1335,10 @@ export default function ImageViewer({
   // 初始化历史记录
   useEffect(() => {
     if (drawingCanvasRef.current && history.length === 0) {
-      const ctx = drawingCanvasRef.current.getContext('2d', { willReadFrequently: true });
+      const ctx = drawingCanvasRef.current.getContext('2d', {
+        willReadFrequently: true,
+        alpha: true
+      });
       if (ctx) {
         const imageData = ctx.getImageData(0, 0, drawingCanvasRef.current.width, drawingCanvasRef.current.height);
         setHistory([imageData]);
@@ -1265,7 +1591,12 @@ export default function ImageViewer({
             style={{
               right: `${minimapPosition.x}px`,
               bottom: `${minimapPosition.y}px`,
-              opacity: isDraggingMinimap ? 0.8 : 1
+              opacity: isDraggingMinimap ? 0.8 : 0.85,
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              backdropFilter: 'blur(4px)'
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
             }}
             onMouseEnter={() => setIsMinimapHovered(true)}
             onMouseLeave={() => setIsMinimapHovered(false)}
@@ -1382,7 +1713,11 @@ export default function ImageViewer({
           <div
             className="image-container"
             style={{
-              transform: `translate(${position.x}px, ${position.y}px) scale(${zoom / 100})`
+              transform: `translate(${position.x}px, ${position.y}px) scale(${zoom / 100})`,
+              willChange: 'transform',
+              transformStyle: 'preserve-3d',
+              backfaceVisibility: 'hidden',
+              isolation: 'isolate' as any
             }}
           >
             {imageSrc && (
@@ -1394,6 +1729,29 @@ export default function ImageViewer({
                   lineHeight: 0
                 }}
               >
+                {/* 透明背景棋盘格 - 1像素格子 */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    backgroundImage: `
+                      linear-gradient(45deg, #CCCCCC 25%, transparent 25%),
+                      linear-gradient(-45deg, #CCCCCC 25%, transparent 25%),
+                      linear-gradient(45deg, transparent 75%, #CCCCCC 75%),
+                      linear-gradient(-45deg, transparent 75%, #CCCCCC 75%)
+                    `,
+                    backgroundSize: '2px 2px',
+                    backgroundPosition: '0 0, 0 1px, 1px -1px, -1px 0px',
+                    backgroundColor: '#999999',
+                    imageRendering: 'pixelated',
+                    WebkitFontSmoothing: 'none',
+                    pointerEvents: 'none',
+                    zIndex: 0
+                  }}
+                />
                 <img
                   ref={imageRef}
                   src={imageSrc}
@@ -1412,9 +1770,15 @@ export default function ImageViewer({
                 <canvas
                   ref={canvasRef}
                   style={{
+                    position: 'relative',
                     display: 'block',
                     verticalAlign: 'top',
-                    imageRendering: 'pixelated'
+                    imageRendering: 'pixelated',
+                    willChange: 'transform, contents',
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    perspective: 1000,
+                    zIndex: 1
                   }}
                 />
                 {/* 绘图层Canvas */}
@@ -1426,7 +1790,12 @@ export default function ImageViewer({
                     left: 0,
                     display: 'block',
                     verticalAlign: 'top',
-                    imageRendering: 'pixelated'
+                    imageRendering: 'pixelated',
+                    willChange: 'transform, contents',
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    perspective: 1000,
+                    zIndex: 2
                   }}
                 />
                 {/* 预览层Canvas */}
@@ -1439,12 +1808,17 @@ export default function ImageViewer({
                     display: 'block',
                     verticalAlign: 'top',
                     imageRendering: 'pixelated',
-                    pointerEvents: 'none'
+                    pointerEvents: 'none',
+                    willChange: 'transform, contents',
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    perspective: 1000,
+                    zIndex: 3
                   }}
                 />
-                {zoom > 750 && imageSize.width > 0 && imageSize.height > 0 && (
+                {/* 像素格子 - SVG线条方式,类似Photoshop */}
+                {zoom > 400 && imageSize.width > 0 && imageSize.height > 0 && (
                   <svg
-                    className="pixel-grid"
                     style={{
                       position: 'absolute',
                       top: 0,
@@ -1452,30 +1826,38 @@ export default function ImageViewer({
                       width: '100%',
                       height: '100%',
                       pointerEvents: 'none',
-                      display: 'block'
+                      zIndex: 100
                     }}
+                    xmlns="http://www.w3.org/2000/svg"
                     viewBox={`0 0 ${imageSize.width} ${imageSize.height}`}
                     preserveAspectRatio="none"
                   >
-                    <defs>
-                      <pattern
-                        id="pixel-grid-pattern"
-                        width="1"
-                        height="1"
-                        patternUnits="userSpaceOnUse"
-                      >
-                        <rect
-                          x="0"
-                          y="0"
-                          width="1"
-                          height="1"
-                          fill="none"
-                          stroke="rgba(0, 0, 0, 0.4)"
-                          strokeWidth="0.02"
-                        />
-                      </pattern>
-                    </defs>
-                    <rect x="0" y="0" width={imageSize.width} height={imageSize.height} fill="url(#pixel-grid-pattern)" />
+                    {/* 绘制垂直线 */}
+                    {Array.from({ length: imageSize.width + 1 }).map((_, i) => (
+                      <line
+                        key={`v-${i}`}
+                        x1={i}
+                        y1={0}
+                        x2={i}
+                        y2={imageSize.height}
+                        stroke="rgba(0,0,0,0.2)"
+                        strokeWidth="0.05"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
+                    {/* 绘制水平线 */}
+                    {Array.from({ length: imageSize.height + 1 }).map((_, i) => (
+                      <line
+                        key={`h-${i}`}
+                        x1={0}
+                        y1={i}
+                        x2={imageSize.width}
+                        y2={i}
+                        stroke="rgba(0,0,0,0.2)"
+                        strokeWidth="0.05"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    ))}
                   </svg>
                 )}
               </div>

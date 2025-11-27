@@ -4,7 +4,6 @@ import {
   selectFolder,
   getMinecraftVersions,
   downloadAndExtractTemplate,
-  type VersionManifest,
   type VersionInfo,
 } from "../utils/tauri-api";
 import "./CreatePackModal.css";
@@ -78,7 +77,7 @@ export default function CreatePackModal({
 
   // 渲染预览文本
   const renderPreview = () => {
-    const parts: JSX.Element[] = [];
+    const parts: React.ReactElement[] = [];
     let currentText = '';
     let currentColor = '#AAAAAA';
     let currentStyles: string[] = [];
@@ -416,7 +415,7 @@ export default function CreatePackModal({
                 <h3>正在创建材质包...</h3>
                 <p>正在下载并提取版本 {selectedVersion} 的资源文件</p>
                 {templateCacheEnabled && (
-                  <p className="cache-hint">💾 jar文件将被缓存以供下次使用</p>
+                  <p className="cache-hint"> jar文件将被缓存以供下次使用</p>
                 )}
               </div>
             </div>

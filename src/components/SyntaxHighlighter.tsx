@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import './SyntaxHighlighter.css';
 
 interface SyntaxHighlighterProps {
@@ -130,29 +130,48 @@ const tokenizeJSON = (code: string): Token[] => {
 };
 
 export default function SyntaxHighlighter({ code, language, scrollTop = 0, scrollLeft = 0 }: SyntaxHighlighterProps) {
-  if (language !== 'json') {
+  const tokens = useMemo(() => {
+    if (language !== 'json') {
+      return null;
+    }
+    
+    try {
+      const startTime = performance.now();
+      const result = tokenizeJSON(code);
+      const duration = performance.now() - startTime;
+      console.log(`[性能-语法高亮]  计算tokens完成, 耗时: ${duration.toFixed(2)}ms, tokens数量: ${result.length}`);
+      return result;
+    } catch (error) {
+      console.error('[性能-语法高亮]  错误:', error);
+      return null;
+    }
+  }, [code, language]);
+
+  // 缓存渲染的token元素
+  const tokenElements = useMemo(() => {
+    if (!tokens) return null;
+    
+    console.log(`[性能-语法高亮] 🔨 渲染${tokens.length}个token元素`);
+    return tokens.map((token, index) => (
+      <span key={index} className={`token-${token.type}`}>
+        {token.value}
+      </span>
+    ));
+  }, [tokens]);
+
+  if (language !== 'json' || !tokens) {
     return <pre>{code}</pre>;
   }
 
-  try {
-    const tokens = tokenizeJSON(code);
-
-    return (
-      <div
-        className="syntax-highlighter"
-        style={{
-          transform: `translate(-${scrollLeft}px, -${scrollTop}px)`
-        }}
-      >
-        {tokens.map((token, index) => (
-          <span key={index} className={`token-${token.type}`}>
-            {token.value}
-          </span>
-        ))}
-      </div>
-    );
-  } catch (error) {
-    console.error('SyntaxHighlighter error:', error);
-    return <pre>{code}</pre>;
-  }
+  return (
+    <div
+      className="syntax-highlighter"
+      style={{
+        transform: `translate(-${scrollLeft}px, -${scrollTop}px)`,
+        willChange: 'transform'
+      }}
+    >
+      {tokenElements}
+    </div>
+  );
 }

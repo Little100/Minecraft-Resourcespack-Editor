@@ -85,6 +85,7 @@ function App() {
     const savedHistoryEnabled = localStorage.getItem('historyEnabled');
     const savedMaxHistoryCount = localStorage.getItem('maxHistoryCount');
     const savedTemplateCacheEnabled = localStorage.getItem('templateCacheEnabled');
+    const savedDebugMode = localStorage.getItem('debugMode');
     return {
       theme: savedTheme || 'system',
       fontFamily: savedFont || 'system',
@@ -93,6 +94,7 @@ function App() {
       historyEnabled: savedHistoryEnabled === null ? true : savedHistoryEnabled === 'true',
       maxHistoryCount: savedMaxHistoryCount ? parseInt(savedMaxHistoryCount) : 30,
       templateCacheEnabled: savedTemplateCacheEnabled === 'true',
+      debugMode: savedDebugMode === 'true',
     };
   };
 
@@ -109,6 +111,7 @@ function App() {
   const [historyEnabled, setHistoryEnabled] = useState<boolean>(settings.historyEnabled);
   const [maxHistoryCount, setMaxHistoryCount] = useState<number>(settings.maxHistoryCount);
   const [templateCacheEnabled, setTemplateCacheEnabled] = useState<boolean>(settings.templateCacheEnabled);
+  const [debugMode, setDebugMode] = useState<boolean>(settings.debugMode);
 
   useEffect(() => {
     const applyTheme = () => {
@@ -186,6 +189,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('templateCacheEnabled', String(templateCacheEnabled));
   }, [templateCacheEnabled]);
+
+  useEffect(() => {
+    localStorage.setItem('debugMode', String(debugMode));
+  }, [debugMode]);
 
   const handleImportZip = async () => {
     try {
@@ -332,15 +339,15 @@ function App() {
   if (packInfo) {
     return (
       <div className="app-container">
-        <TitleBar showStats={false} />
-        <PackEditor packInfo={packInfo} onClose={() => setPackInfo(null)} />
+        <TitleBar showStats={false} debugMode={debugMode} />
+        <PackEditor packInfo={packInfo} onClose={() => setPackInfo(null)} debugMode={debugMode} />
       </div>
     );
   }
 
   return (
     <div className="app-container">
-      <TitleBar showStats={false} />
+      <TitleBar showStats={false} debugMode={debugMode} />
       <main className="app-main">
         <div className="hero-section">
           <div className="hero-logos">
@@ -470,12 +477,12 @@ function App() {
                 className={`setting-option ${historyEnabled ? 'active' : ''}`}
                 onClick={() => setHistoryEnabled(!historyEnabled)}
               >
-                {historyEnabled ? '✓ ' : ''}已启用
+                {historyEnabled ? '✓ 已启用 ' : '已禁用'}
               </button>
             </div>
             <p className="setting-hint">
               {historyEnabled ? '编辑历史将被保存，支持冷重启后恢复' : '编辑历史将不会被保存'}
-              {historyEnabled && ' ⚠️ 可能会占用较多磁盘空间'}
+              {historyEnabled && ' ️ 可能会占用较多磁盘空间'}
             </p>
             
             {historyEnabled && (
@@ -505,13 +512,28 @@ function App() {
                 className={`setting-option ${templateCacheEnabled ? 'active' : ''}`}
                 onClick={() => setTemplateCacheEnabled(!templateCacheEnabled)}
               >
-                {templateCacheEnabled ? '✓ ' : ''}已启用
+                {templateCacheEnabled ? '✓ 已启用 ' : '已禁用'}
               </button>
             </div>
             <p className="setting-hint">
               {templateCacheEnabled
                 ? '下载的Minecraft版本jar文件将被保留在temp目录中，下次使用相同版本时无需重新下载'
                 : '下载的jar文件将在使用后自动删除，每次都需要重新下载'}
+            </p>
+          </div>
+
+          <div className="setting-group">
+            <label>调试模式</label>
+            <div className="setting-options">
+              <button
+                className={`setting-option ${debugMode ? 'active' : ''}`}
+                onClick={() => setDebugMode(!debugMode)}
+              >
+                {debugMode ? '✓ 已启用 ' : '已禁用'}
+              </button>
+            </div>
+            <p className="setting-hint">
+              {debugMode ? '标题栏将显示调试按钮，可以查看后台日志和系统信息' : '调试功能已关闭'}
             </p>
           </div>
 
@@ -592,7 +614,7 @@ function App() {
                 <div className="service-hint">
                   {serverRunning ? (
                     <>
-                      <p>✅ 服务器运行中</p>
+                      <p> 服务器运行中</p>
                       <p className="hint-text">
                         访问地址：<strong>http://localhost:{port}</strong>
                       </p>
@@ -653,7 +675,7 @@ function App() {
           <div className="overlay" onClick={handleCancelImport}></div>
           <div className="confirm-dialog">
             <div className="confirm-dialog-header">
-              <h3>⚠️ 缺少 pack.mcmeta 文件</h3>
+              <h3>️ 缺少 pack.mcmeta 文件</h3>
             </div>
             <div className="confirm-dialog-content">
               <p>所选文件夹中未找到 <code>pack.mcmeta</code> 文件。</p>

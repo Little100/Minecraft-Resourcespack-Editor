@@ -50,6 +50,11 @@ export async function readFileContent(filePath: string): Promise<string> {
   return await invoke<string>("read_file_content", { filePath });
 }
 
+// 读取内容
+export async function readFileBinary(filePath: string): Promise<Uint8Array> {
+  return await invoke<Uint8Array>("read_file_binary", { filePath });
+}
+
 // 写入文件内容
 export async function writeFileContent(
   filePath: string,

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./PackEditor.css";
 import type { PackInfo } from "../types/pack";
@@ -19,11 +19,14 @@ interface FileTreeNode {
   path: string;
   is_dir: boolean;
   children?: FileTreeNode[];
+  file_count?: number;
+  loaded?: boolean;
 }
 
 interface PackEditorProps {
   packInfo: PackInfo;
   onClose: () => void;
+  debugMode?: boolean;
 }
 
 interface ContextMenu {
@@ -45,7 +48,7 @@ interface ImageInfo {
   height: number;
 }
 
-export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
+export default function PackEditor({ packInfo, onClose, debugMode = false }: PackEditorProps) {
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabIndex, setActiveTabIndex] = useState<number>(-1);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -73,12 +76,18 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
   const [historySize, setHistorySize] = useState<number>(0);
   const [showClearHistoryDialog, setShowClearHistoryDialog] = useState(false);
   const [historyStats, setHistoryStats] = useState<{ totalSize: number; fileCount: number } | null>(null);
+  const [isPreloading, setIsPreloading] = useState(false);
+  const [language, setLanguage] = useState<'en' | 'zh'>('en');
+  const [languageMap, setLanguageMap] = useState<Record<string, string>>({});
+  const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
+  const fileTreeRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const toolSizeMenuRef = useRef<HTMLDivElement>(null);
   const tabsContainerRef = useRef<HTMLDivElement>(null);
+  const loadingFolders = useRef<Set<string>>(new Set());
 
   const selectedFile = activeTabIndex >= 0 ? openTabs[activeTabIndex]?.path : null;
   const fileContent = activeTabIndex >= 0 ? openTabs[activeTabIndex]?.content : "";
@@ -86,6 +95,137 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
   const getFileExtension = (filePath: string): string => {
     return filePath.split('.').pop()?.toLowerCase() || '';
   };
+
+  // 后缀翻译映射表
+  const suffixTranslations: Record<string, string> = {
+    // 开关状态
+    'on': '开',
+    'off': '关',
+    // 方向
+    'top': '上',
+    'bottom': '下',
+    'side': '边',
+    'front': '前',
+    'back': '后',
+    'left': '左',
+    'right': '右',
+    'north': '北',
+    'south': '南',
+    'east': '东',
+    'west': '西',
+    'up': '上',
+    'down': '下',
+    // 状态
+    'lit': '点亮',
+    'tip': '尖',
+    'base': '底部',
+    'stage': '阶段',
+    'age': '生长',
+    'powered': '充能',
+    'unpowered': '未充能',
+  };
+
+  // 将文件路径转换为映射键并提取后缀信息
+  const pathToMapKey = (filePath: string): string | null => {
+    // 移除文件扩展名
+    const pathWithoutExt = filePath.replace(/\.[^/.]+$/, '');
+    
+    // 匹配路径
+    const blockMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/block\/(.+)/);
+    if (blockMatch) {
+      return `block.minecraft.${blockMatch[1].replace(/\//g, '.')}`;
+    }
+    
+    const itemMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/item\/(.+)/);
+    if (itemMatch) {
+      return `item.minecraft.${itemMatch[1].replace(/\//g, '.')}`;
+    }
+    
+    return null;
+  };
+
+  const translateFileName = useCallback((fileName: string, filePath: string): string => {
+    // 检查缓存
+    if (translationCache[filePath]) {
+      return translationCache[filePath];
+    }
+
+    const mapKey = pathToMapKey(filePath);
+    if (!mapKey) return fileName;
+
+    // 移除扩展名
+    const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
+    const ext = fileName.substring(nameWithoutExt.length);
+
+    // 尝试直接匹配完整的映射键
+    if (languageMap[mapKey]) {
+      return languageMap[mapKey];
+    }
+
+    // 尝试分离后缀并翻译
+    const parts = nameWithoutExt.split('_');
+    
+    // 从后往前检查后缀
+    const suffixes: string[] = [];
+    let baseParts = [...parts];
+    
+    // 检查最后几个部分是否是已知后缀或数字
+    for (let i = parts.length - 1; i > 0; i--) {
+      const part = parts[i];
+      
+      if (/^\d+$/.test(part)) {
+        suffixes.unshift(part);
+        baseParts = parts.slice(0, i);
+      }
+      else if (suffixTranslations[part]) {
+        suffixes.unshift(suffixTranslations[part]);
+        baseParts = parts.slice(0, i);
+      }
+      else {
+        break;
+      }
+    }
+
+    // 构建基础映射键
+    const baseName = baseParts.join('_');
+    const baseKey = mapKey.replace(nameWithoutExt, baseName);
+    
+    // 查找基础翻译
+    if (languageMap[baseKey]) {
+      const baseTranslation = languageMap[baseKey];
+      
+      if (suffixes.length > 0) {
+        return `${baseTranslation}_${suffixes.join('_')}`;
+      }
+      
+      return baseTranslation;
+    }
+
+    return fileName;
+  }, [languageMap, translationCache]);
+
+  // 获取文件的显示名称
+  const getDisplayName = useCallback((fileName: string, filePath: string): string => {
+    if (language === 'zh') {
+      // 直接从缓存获取翻译
+      const translated = translationCache[filePath];
+      
+      if (debugMode && filePath.includes('bamboo')) {
+        console.log('[翻译调试]', {
+          fileName,
+          filePath,
+          translated,
+          cacheSize: Object.keys(translationCache).length,
+          hasCacheEntry: filePath in translationCache
+        });
+      }
+      
+      if (translated) {
+        return `${translated} (${fileName})`;
+      }
+    }
+    return fileName;
+  }, [language, translationCache, debugMode]);
   
   const isPngFile = selectedFile ? getFileExtension(selectedFile) === 'png' : false;
 
@@ -117,14 +257,151 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     }
   };
 
-  // 加载文件树
+  const precomputeTranslations = useCallback((node: FileTreeNode, path: string = '', isRoot: boolean = false): Record<string, string> => {
+    const cache: Record<string, string> = {};
+    
+    const currentPath = isRoot ? '' : (path ? `${path}/${node.name}` : node.name);
+    
+    if (!node.is_dir) {
+      const mapKey = pathToMapKey(currentPath);
+      if (mapKey) {
+        // 移除扩展名
+        const nameWithoutExt = node.name.replace(/\.[^/.]+$/, '');
+        
+        // 尝试直接匹配完整的映射键
+        let translation = languageMap[mapKey];
+        
+        // 如果是 item 路径且没找到翻译尝试用 block 路径
+        if (!translation && mapKey.startsWith('item.minecraft.')) {
+          const blockKey = mapKey.replace('item.minecraft.', 'block.minecraft.');
+          translation = languageMap[blockKey];
+        }
+        
+        if (translation) {
+          cache[currentPath] = translation;
+        } else {
+          // 尝试分离后缀并翻译
+          const parts = nameWithoutExt.split('_');
+          
+          // 从后往前检查后缀
+          const suffixes: string[] = [];
+          let baseParts = [...parts];
+          
+          // 检查最后几个部分是否是已知后缀或数字
+          for (let i = parts.length - 1; i > 0; i--) {
+            const part = parts[i];
+            
+            if (/^\d+$/.test(part)) {
+              suffixes.unshift(part);
+              baseParts = parts.slice(0, i);
+            }
+            else if (suffixTranslations[part]) {
+              suffixes.unshift(suffixTranslations[part]);
+              baseParts = parts.slice(0, i);
+            }
+            else {
+              break;
+            }
+          }
+          
+          // 构建基础映射键
+          const baseName = baseParts.join('_');
+          const baseKey = mapKey.replace(nameWithoutExt, baseName);
+          
+          // 查找基础翻译
+          let baseTranslation = languageMap[baseKey];
+          
+          // 如果是 item 路径且没找到翻译，尝试用 block 路径
+          if (!baseTranslation && baseKey.startsWith('item.minecraft.')) {
+            const blockBaseKey = baseKey.replace('item.minecraft.', 'block.minecraft.');
+            baseTranslation = languageMap[blockBaseKey];
+          }
+          
+          if (baseTranslation) {
+            if (suffixes.length > 0) {
+              cache[currentPath] = `${baseTranslation}_${suffixes.join('_')}`;
+            } else {
+              cache[currentPath] = baseTranslation;
+            }
+          }
+        }
+      }
+    }
+    
+    // 递归处理子节点
+    if (node.children) {
+      node.children.forEach(child => {
+        const childCache = precomputeTranslations(child, currentPath, false);
+        Object.assign(cache, childCache);
+      });
+    }
+    
+    return cache;
+  }, [languageMap]);
+
+  // 加载语言映射表
+  useEffect(() => {
+    const loadMap = async () => {
+      try {
+        const map = await invoke<Record<string, string>>('load_language_map');
+        setLanguageMap(map);
+        console.log('[语言映射] 映射表加载完成，条目数:', Object.keys(map).length);
+      } catch (error) {
+        console.error('[语言映射] 加载映射表失败:', error);
+        setLanguageMap({});
+      }
+    };
+    
+    loadMap();
+  }, []);
+
+  useEffect(() => {
+    if (fileTree && Object.keys(languageMap).length > 0) {
+      console.log('[语言映射] 开始预计算翻译缓存...');
+      const startTime = performance.now();
+      
+      const cache = precomputeTranslations(fileTree, '', true);
+      setTranslationCache(cache);
+      
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[语言映射] 翻译缓存完成！耗时: ${duration}ms, 缓存条目: ${Object.keys(cache).length}`);
+      
+      // 调试
+      const sampleKeys = Object.keys(cache).slice(0, 5);
+      console.log('[语言映射] 缓存示例键:', sampleKeys);
+    }
+  }, [fileTree, languageMap]);
+
   useEffect(() => {
     const loadFileTree = async () => {
+      console.log('[性能] 开始加载文件树...');
+      const startTime = performance.now();
+      
       try {
         const tree = await invoke<FileTreeNode>('get_file_tree');
+        const endTime = performance.now();
+        const duration = (endTime - startTime).toFixed(2);
+        
+        console.log(`[性能]  文件树加载完成! 耗时: ${duration}ms`);
+        console.log(`[性能] 文件树根节点:`, tree);
+        
         setFileTree(tree);
+        
+        // 启动积极预加载整个资源包
+        setIsPreloading(true);
+        invoke('preload_folder_aggressive', { folderPath: '' })
+          .then((count: any) => {
+            console.log(`[性能-积极预加载]  完成! 预加载了 ${count} 个文件`);
+            setIsPreloading(false);
+          })
+          .catch((err: any) => {
+            console.error('[性能-积极预加载]  失败:', err);
+            setIsPreloading(false);
+          });
       } catch (error) {
-        console.error('加载文件树失败:', error);
+        const endTime = performance.now();
+        const duration = (endTime - startTime).toFixed(2);
+        console.error(`[性能]  加载文件树失败! 耗时: ${duration}ms`, error);
         alert(`加载文件树失败: ${error}`);
       }
     };
@@ -135,7 +412,13 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     // 每30秒更新一次大小统计
     const interval = setInterval(updateSizeStats, 30000);
     
-    return () => clearInterval(interval);
+    // 清理缓存
+    return () => {
+      clearInterval(interval);
+      invoke('clear_preloader_cache')
+        .then(() => console.log('[性能] 预加载缓存已清理'))
+        .catch((err: any) => console.error('[性能] 清理缓存失败:', err));
+    };
   }, []);
 
   // 关闭右键菜单和工具大小菜单
@@ -208,7 +491,8 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     };
   }, [isResizingSidebar, isResizingToolbar]);
 
-  const loadFileContent = async (filePath: string) => {
+  // 使用useCallback优化文件加载函数
+  const loadFileContent = useCallback(async (filePath: string) => {
     setIsLoading(true);
     try {
       const extension = filePath.split('.').pop()?.toLowerCase();
@@ -226,58 +510,54 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
-  const openFileInTab = async (filePath: string) => {
-    // 检查文件是否已经打开
+  const openFileInTab = useCallback(async (filePath: string) => {
+    console.log(`[性能-打开文件]  开始: ${filePath}`);
+    const startTime = performance.now();
+    
     const existingTabIndex = openTabs.findIndex(tab => tab.path === filePath);
     
     if (existingTabIndex >= 0) {
-      // 文件打开 切换到该标签
+      const duration = (performance.now() - startTime).toFixed(2);
+      console.log(`[性能-打开文件]  切换到已打开的标签! 耗时: ${duration}ms`);
       setActiveTabIndex(existingTabIndex);
       setCurrentFileHasChanges(false);
-    } else {
-      const content = await loadFileContent(filePath);
       
-      const newTab: OpenTab = {
-        path: filePath,
-        content: content,
-        isDirty: false,
-      };
-      
-      setOpenTabs([...openTabs, newTab]);
-      setActiveTabIndex(openTabs.length);
-      setCurrentFileHasChanges(false);
+      return;
     }
     
+    // 检查是否是图片
     const ext = filePath.split('.').pop()?.toLowerCase();
-    if (ext === 'png') {
-      try {
-        const base64 = await invoke<string>('get_image_thumbnail', {
-          imagePath: filePath,
-          maxSize: 2048
-        });
-        
-        const imageSrc = base64.startsWith('data:')
-          ? base64
-          : `data:image/png;base64,${base64}`;
-        
-        const img = new Image();
-        img.onload = () => {
-          setImageInfo({ width: img.naturalWidth, height: img.naturalHeight });
-        };
-        img.onerror = () => {
-          setImageInfo(null);
-        };
-        img.src = imageSrc;
-      } catch (error) {
-        console.error('获取图片信息失败:', error);
-        setImageInfo(null);
-      }
-    } else {
+    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '');
+    
+    console.log(`[性能-打开文件] 文件类型: ${isImage ? '图片' : '文本'}`);
+    
+    let content = '';
+    if (!isImage) {
+      const loadStart = performance.now();
+      content = await loadFileContent(filePath);
+      const loadDuration = (performance.now() - loadStart).toFixed(2);
+      console.log(`[性能-打开文件]   ├─ 文本内容加载耗时: ${loadDuration}ms`);
+    }
+    
+    const duration = (performance.now() - startTime).toFixed(2);
+    console.log(`[性能-打开文件]  完成! 总耗时: ${duration}ms`);
+    
+    const newTab: OpenTab = {
+      path: filePath,
+      content: content,
+      isDirty: false,
+    };
+    
+    setOpenTabs([...openTabs, newTab]);
+    setActiveTabIndex(openTabs.length);
+    setCurrentFileHasChanges(false);
+    
+    if (!isImage) {
       setImageInfo(null);
     }
-  };
+  }, [openTabs, loadFileContent]);
 
   const closeTab = (index: number, e?: React.MouseEvent) => {
     if (e) {
@@ -476,6 +756,97 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
       setShowToolSizeMenu(true);
     }
   };
+const loadFolderChildren = useCallback(async (folderPath: string) => {
+  if (loadingFolders.current.has(folderPath)) {
+    console.log(`[性能-防抖] ⏭️ 跳过重复加载: ${folderPath}`);
+    return [];
+  }
+  
+  console.log(`[性能-文件夹] 📂 开始加载: ${folderPath}`);
+  const startTime = performance.now();
+  
+  // 标记为正在加载
+  loadingFolders.current.add(folderPath);
+  
+  try {
+    const invokeStart = performance.now();
+    const children = await invoke<FileTreeNode[]>('load_folder_children', {
+      folderPath: folderPath
+    });
+    const invokeEnd = performance.now();
+    const invokeDuration = (invokeEnd - invokeStart).toFixed(2);
+    
+    const endTime = performance.now();
+    const totalDuration = (endTime - startTime).toFixed(2);
+    
+    console.log(`[性能-文件夹]  加载完成: ${folderPath}`);
+    console.log(`  ├─ Tauri调用耗时: ${invokeDuration}ms`);
+    console.log(`  ├─ 总耗时: ${totalDuration}ms`);
+    console.log(`  └─ 子项数量: ${children.length}`);
+    
+    return children;
+  } catch (error) {
+    const endTime = performance.now();
+    const duration = (endTime - startTime).toFixed(2);
+    console.error(`[性能-文件夹]  加载失败: ${folderPath}, 耗时: ${duration}ms`, error);
+    return [];
+  } finally {
+    loadingFolders.current.delete(folderPath);
+  }
+}, []);
+
+  const toggleFolder = useCallback(async (path: string, node: FileTreeNode) => {
+    const childCount = node.children?.length || 0;
+    console.log(`[性能-文件夹展开] 📂 点击文件夹: ${path}, 当前展开状态: ${expandedFolders.has(path)}, loaded: ${node.loaded}, children: ${childCount}`);
+    
+    const startTime = performance.now();
+    const newExpanded = new Set(expandedFolders);
+    
+    if (newExpanded.has(path)) {
+      console.log(`[性能-文件夹展开] 折叠文件夹: ${path}`);
+      newExpanded.delete(path);
+      setExpandedFolders(newExpanded);
+    } else {
+      console.log(`[性能-文件夹展开] 展开文件夹: ${path}`);
+      newExpanded.add(path);
+      
+      if (node.is_dir && !node.loaded && (!node.children || node.children.length === 0)) {
+        console.log(`[性能-文件夹展开] 需要懒加载子节点: ${path}`);
+        const children = await loadFolderChildren(path);
+        if (children.length > 0) {
+          const updateNodeChildren = (n: FileTreeNode): FileTreeNode => {
+            if (n.path === path) {
+              return { ...n, children, loaded: true };
+            }
+            if (n.children) {
+              return { ...n, children: n.children.map(updateNodeChildren) };
+            }
+            return n;
+          };
+          
+          if (fileTree) {
+            setFileTree(updateNodeChildren(fileTree));
+          }
+        }
+      } else {
+        console.log(`[性能-文件夹展开] 子节点已加载，直接展开: ${path}`);
+      }
+      
+      if (childCount > 100) {
+        console.log(`[性能-文件夹展开] ️ 大量子节点 (${childCount})，使用延迟渲染`);
+        setTimeout(() => {
+          setExpandedFolders(newExpanded);
+          const duration = (performance.now() - startTime).toFixed(2);
+          console.log(`[性能-文件夹展开]  渲染完成，总耗时: ${duration}ms`);
+        }, 0);
+      } else {
+        setExpandedFolders(newExpanded);
+        const duration = (performance.now() - startTime).toFixed(2);
+        console.log(`[性能-文件夹展开]  渲染完成，耗时: ${duration}ms`);
+      }
+    }
+
+  }, [expandedFolders, fileTree, loadFolderChildren]);
 
   const renderFileViewer = () => {
     if (!selectedFile) {
@@ -573,16 +944,6 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     );
   };
 
-  const toggleFolder = (path: string) => {
-    const newExpanded = new Set(expandedFolders);
-    if (newExpanded.has(path)) {
-      newExpanded.delete(path);
-    } else {
-      newExpanded.add(path);
-    }
-    setExpandedFolders(newExpanded);
-  };
-
   const handleContextMenu = (e: React.MouseEvent, path: string, type: 'file' | 'folder') => {
     e.preventDefault();
     e.stopPropagation();
@@ -640,15 +1001,14 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     setRenameValue("");
   };
 
-  // 刷新文件树
-  const refreshFileTree = async () => {
+  const refreshFileTree = useCallback(async () => {
     try {
       const tree = await invoke<FileTreeNode>('get_file_tree');
       setFileTree(tree);
     } catch (error) {
       console.error('刷新文件树失败:', error);
     }
-  };
+  }, []);
 
   const handleMenuAction = async (action: string) => {
     if (!contextMenu) return;
@@ -726,14 +1086,21 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     }
   };
 
-  const renderFileTree = (
-    node: FileTreeNode,
-    path: string = "",
-    level: number = 0,
-    isRoot: boolean = false,
-    isLast: boolean = false,
-    parentLines: boolean[] = []
-  ): React.ReactNode => {
+  const FileTreeItem = memo(({
+    node,
+    path,
+    level,
+    isRoot,
+    isLast,
+    parentLines
+  }: {
+    node: FileTreeNode;
+    path: string;
+    level: number;
+    isRoot: boolean;
+    isLast: boolean;
+    parentLines: boolean[];
+  }) => {
     // 过滤掉 .history 文件夹
     if (node.name === '.history') {
       return null;
@@ -777,17 +1144,19 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
 
     if (node.is_dir) {
       const children = node.children || [];
-      const folders = children.filter(child => child.is_dir);
-      const files = children.filter(child => !child.is_dir);
+      // 过滤掉 .history 文件夹
+      const filteredChildren = children.filter(child => child.name !== '.history');
+      const folders = filteredChildren.filter(child => child.is_dir);
+      const files = filteredChildren.filter(child => !child.is_dir);
       const sortedChildren = [...folders, ...files];
       
       return (
-        <div key={currentPath} className="tree-node">
+        <div className="tree-node">
           <div
-            className="tree-item folder"
+            className={`tree-item folder ${isExpanded ? 'expanded' : ''}`}
             style={{ paddingLeft: `${level * 20 + 24}px` }}
             onClick={(e) => {
-              if (!isRenaming) toggleFolder(currentPath);
+              if (!isRenaming) toggleFolder(currentPath, node);
             }}
             onContextMenu={(e) => handleContextMenu(e, currentPath, 'folder')}
             onDoubleClick={(e) => {
@@ -817,7 +1186,9 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <span className="item-name">{node.name}</span>
+              <span className="item-name" title={node.name}>
+                {getDisplayName(node.name, currentPath)}
+              </span>
             )}
           </div>
           {isExpanded && sortedChildren.length > 0 && (
@@ -827,13 +1198,16 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
                 if (level > 0) {
                   newParentLines[level - 1] = !isLast;
                 }
-                return renderFileTree(
-                  child,
-                  currentPath,
-                  level + 1,
-                  false,
-                  index === sortedChildren.length - 1,
-                  newParentLines
+                return (
+                  <FileTreeItem
+                    key={child.path || `${currentPath}/${child.name}`}
+                    node={child}
+                    path={currentPath}
+                    level={level + 1}
+                    isRoot={false}
+                    isLast={index === sortedChildren.length - 1}
+                    parentLines={newParentLines}
+                  />
                 );
               })}
             </div>
@@ -843,7 +1217,6 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
     } else {
       return (
         <div
-          key={currentPath}
           className={`tree-item file ${selectedFile === currentPath ? "selected" : ""}`}
           style={{ paddingLeft: `${level * 20 + 24}px` }}
           onClick={(e) => {
@@ -875,11 +1248,39 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="item-name">{node.name}</span>
+            <span className="item-name" title={currentPath}>
+              {getDisplayName(node.name, currentPath)}
+            </span>
           )}
         </div>
       );
     }
+  });
+
+  const renderFileTree = (
+    node: FileTreeNode,
+    path: string = "",
+    level: number = 0,
+    isRoot: boolean = false,
+    isLast: boolean = false,
+    parentLines: boolean[] = []
+  ): React.ReactNode => {
+    // 过滤掉 .history 文件夹
+    if (node.name === '.history') {
+      return null;
+    }
+    
+    return (
+      <FileTreeItem
+        key={node.path || node.name}
+        node={node}
+        path={path}
+        level={level}
+        isRoot={isRoot}
+        isLast={isLast}
+        parentLines={parentLines}
+      />
+    );
   };
 
   return (
@@ -888,6 +1289,7 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
         packSize={packSize}
         historySize={historySize}
         showStats={true}
+        debugMode={debugMode}
       />
       <div className="pack-editor">
         {/* 调整大小指示器 */}
@@ -913,6 +1315,22 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
             <h3>文件</h3>
           </div>
           <div className="sidebar-header-right">
+            <button
+              className={`btn-icon ${language === 'zh' ? 'active' : ''}`}
+              onClick={() => {
+                const newLang = language === 'en' ? 'zh' : 'en';
+                setLanguage(newLang);
+                console.log(`[语言切换] 切换到${newLang === 'zh' ? '中文' : '英文'}模式`);
+              }}
+              title={language === 'en' ? '切换到中文' : '切换到英文'}
+              style={{
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                minWidth: '32px'
+              }}
+            >
+              {language === 'en' ? '英' : '中'}
+            </button>
             <button className="btn-icon" onClick={refreshFileTree} title="刷新">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
@@ -925,7 +1343,7 @@ export default function PackEditor({ packInfo, onClose }: PackEditorProps) {
             </button>
           </div>
         </div>
-        <div className="file-tree">
+        <div className="file-tree" ref={fileTreeRef}>
           {fileTree ? renderFileTree(fileTree, "", 0, true, true, []) : (
             <div style={{ padding: '1rem', color: 'var(--text-secondary)' }}>
               加载文件树中...
