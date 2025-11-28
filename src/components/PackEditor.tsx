@@ -8,6 +8,9 @@ import PackMetaEditor from "./PackMetaEditor";
 import PngCreatorDialog from "./PngCreatorDialog";
 import SearchModal from "./SearchModal";
 import TitleBar from "./TitleBar";
+import DownloadIndicator from "./DownloadIndicator";
+import DownloadDetails from "./DownloadDetails";
+import DownloadSettingsDialog from "./DownloadSettingsDialog";
 import { readFileContent, writeFileContent, searchFiles, type SearchResponse } from "../utils/tauri-api";
 import {
   FolderIcon, FolderOpenIcon, FileIcon, NewFileIcon,
@@ -88,6 +91,8 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const [soundsJsonExists, setSoundsJsonExists] = useState<boolean>(false);
+  const [showDownloadDetails, setShowDownloadDetails] = useState<boolean>(false);
+  const [showDownloadSettings, setShowDownloadSettings] = useState<boolean>(false);
   const fileTreeRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -138,7 +143,7 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
     // 移除文件扩展名
     const pathWithoutExt = filePath.replace(/\.[^/.]+$/, '');
     
-    // 匹配路径
+    // 匹配新版本路径（block/item）
     const blockMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/block\/(.+)/);
     if (blockMatch) {
       return `block.minecraft.${blockMatch[1].replace(/\//g, '.')}`;
@@ -147,6 +152,17 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
     const itemMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/item\/(.+)/);
     if (itemMatch) {
       return `item.minecraft.${itemMatch[1].replace(/\//g, '.')}`;
+    }
+    
+    // 匹配旧版本路径
+    const blocksMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/blocks\/(.+)/);
+    if (blocksMatch) {
+      return `block.minecraft.${blocksMatch[1].replace(/\//g, '.')}`;
+    }
+    
+    const itemsMatch = pathWithoutExt.match(/assets\/minecraft\/textures\/items\/(.+)/);
+    if (itemsMatch) {
+      return `item.minecraft.${itemsMatch[1].replace(/\//g, '.')}`;
     }
     
     return null;
@@ -979,6 +995,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
           }}
           readOnly={false}
           initialLine={currentTab?.initialLine}
+          onDownloadSounds={selectedFile === 'assets/minecraft/sounds/sounds.json' ? handleDownloadSounds : undefined}
         />
       );
     }
@@ -1124,10 +1141,34 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
     }
   }, []);
 
+  const handleDownloadSounds = async () => {
+    // 显示下载设置对话框
+    setShowDownloadSettings(true);
+  };
+
+  const startDownload = async (threads: number) => {
+    try {
+      const taskId = await invoke<string>('download_minecraft_sounds', {
+        concurrentDownloads: threads
+      });
+      console.log('下载任务已创建:', taskId, '线程数:', threads);
+      
+      setShowDownloadSettings(false);
+      
+      setShowDownloadDetails(true);
+    } catch (error) {
+      console.error('创建下载任务失败:', error);
+      alert(`下载失败: ${error}`);
+    }
+  };
+
   const handleMenuAction = async (action: string) => {
     if (!contextMenu) return;
     
     switch (action) {
+      case 'downloadSounds':
+        await handleDownloadSounds();
+        break;
       case 'delete':
         if (confirm(`确定要删除 ${contextMenu.path} 吗？`)) {
           try {
@@ -1619,17 +1660,31 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
                 <span>新增PNG图片</span>
               </div>
               {/* sounds*/}
-              {contextMenu.path === 'assets/minecraft/sounds' && !soundsJsonExists && (
-                <div className="context-menu-item" onClick={() => handleMenuAction('newSoundsJson')}>
-                  <span className="menu-icon">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M9 18V5l12-2v13"></path>
-                      <circle cx="6" cy="18" r="3"></circle>
-                      <circle cx="18" cy="16" r="3"></circle>
-                    </svg>
-                  </span>
-                  <span>创建 sounds.json</span>
-                </div>
+              {contextMenu.path === 'assets/minecraft/sounds' && (
+                <>
+                  {!soundsJsonExists && (
+                    <div className="context-menu-item" onClick={() => handleMenuAction('newSoundsJson')}>
+                      <span className="menu-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M9 18V5l12-2v13"></path>
+                          <circle cx="6" cy="18" r="3"></circle>
+                          <circle cx="18" cy="16" r="3"></circle>
+                        </svg>
+                      </span>
+                      <span>创建 sounds.json</span>
+                    </div>
+                  )}
+                  <div className="context-menu-item" onClick={() => handleMenuAction('downloadSounds')}>
+                    <span className="menu-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                      </svg>
+                    </span>
+                    <span>下载声音资源</span>
+                  </div>
+                </>
               )}
               <div className="context-menu-divider"></div>
             </>
@@ -1848,6 +1903,22 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
           </div>
         </div>
       </div>
+
+      {/* 下载指示器 */}
+      <DownloadIndicator onShowDetails={() => setShowDownloadDetails(true)} />
+
+      {/* 下载设置对话框 */}
+      {showDownloadSettings && (
+        <DownloadSettingsDialog
+          onConfirm={startDownload}
+          onCancel={() => setShowDownloadSettings(false)}
+        />
+      )}
+
+      {/* 下载详情弹窗 */}
+      {showDownloadDetails && (
+        <DownloadDetails onClose={() => setShowDownloadDetails(false)} />
+      )}
 
       {/* 工具大小调整菜单 */}
       {showToolSizeMenu && (

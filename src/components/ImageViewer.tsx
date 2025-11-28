@@ -235,7 +235,7 @@ const loadImage = async () => {
     
     if (cachedImage) {
       const duration = (performance.now() - startTime).toFixed(2);
-      console.log(`[性能-图片] 🎯 从缓存加载!`);
+      console.log(`[性能-图片] 从缓存加载!`);
       console.log(`  ├─ 缓存查询耗时: ${cacheCheckDuration}ms`);
       console.log(`  └─ 总耗时: ${duration}ms`);
       setImageSrc(cachedImage);

@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   createNewPack,
   selectFolder,
@@ -8,6 +10,17 @@ import {
 } from "../utils/tauri-api";
 import "./CreatePackModal.css";
 import { FolderIcon, NewFolderIcon } from "./Icons";
+
+interface DownloadProgress {
+  task_id: string;
+  status: string;
+  current: number;
+  total: number;
+  current_file: string | null;
+  speed: number;
+  eta: number | null;
+  error: string | null;
+}
 
 interface CreatePackModalProps {
   onClose: () => void;
@@ -38,6 +51,8 @@ export default function CreatePackModal({
   const [versionFilter, setVersionFilter] = useState<"release" | "snapshot" | "all">("release");
   const [showLangFallbackDialog, setShowLangFallbackDialog] = useState(false);
   const [langFallbackInfo, setLangFallbackInfo] = useState<{ requestedVersion: string; usedVersion: string } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
 
   // 颜色代码映射
   const COLOR_CODES = [
@@ -66,6 +81,67 @@ export default function CreatePackModal({
     { code: 'm', name: '删除线', style: 'strikethrough' },
     { code: 'r', name: '重置', style: 'reset' },
   ];
+
+  // 监听下载进度
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupListener = async () => {
+      unlisten = await listen<DownloadProgress>('download-progress', (event) => {
+        const progress = event.payload;
+        if (downloadTaskId && progress.task_id === downloadTaskId) {
+          setDownloadProgress(progress);
+          
+          if (progress.status === 'completed') {
+            setTimeout(() => {
+              setDownloadProgress(null);
+              setDownloadTaskId(null);
+              setLoading(false);
+              onSuccess();
+            }, 500);
+          }
+          
+          // 下载失败显示错误
+          if (progress.status === 'failed') {
+            setTimeout(() => {
+              setDownloadProgress(null);
+              setDownloadTaskId(null);
+              setLoading(false);
+              setError(progress.error || '下载失败');
+              setStep(2);
+            }, 1000);
+          }
+        }
+      });
+    };
+
+    if (step === 3 && downloadTaskId) {
+      setupListener();
+    }
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [step, downloadTaskId, onSuccess]);
+
+  // 格式化文件大小
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+  };
+
+  // 格式化时间
+  const formatTime = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}秒`;
+    const minutes = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${minutes}分${secs}秒`;
+  };
 
   // 插入颜色代码
   const insertColorCode = (code: string) => {
@@ -190,15 +266,11 @@ export default function CreatePackModal({
         setStep(3); // 显示进度
         const result = await downloadAndExtractTemplate(selectedVersion, fullPath, templateCacheEnabled);
         
-        // 检查是否使用了回退版本
-        if (result && result.includes('|LANG_FALLBACK|')) {
-          const parts = result.split('|LANG_FALLBACK|');
-          const usedVersion = parts[1];
-          setLangFallbackInfo({
-            requestedVersion: selectedVersion,
-            usedVersion: usedVersion
-          });
-          setShowLangFallbackDialog(true);
+        if (result && result.includes('|TASK_ID|')) {
+          const parts = result.split('|TASK_ID|');
+          const taskId = parts[1];
+          
+          setDownloadTaskId(taskId);
           return;
         }
       }
@@ -430,6 +502,40 @@ export default function CreatePackModal({
                 <p>正在下载并提取版本 {selectedVersion} 的资源文件</p>
                 {templateCacheEnabled && (
                   <p className="cache-hint"> jar文件将被缓存以供下次使用</p>
+                )}
+                
+                {/* 显示详细进度 */}
+                {downloadProgress && (
+                  <div className="download-progress-details">
+                    <div className="progress-bar-container">
+                      <div
+                        className="progress-bar-fill"
+                        style={{
+                          width: `${downloadProgress.total > 0 ? (downloadProgress.current / downloadProgress.total * 100) : 0}%`
+                        }}
+                      />
+                    </div>
+                    <div className="progress-text">
+                      <span className="progress-percentage">
+                        {downloadProgress.total > 0
+                          ? `${Math.round(downloadProgress.current / downloadProgress.total * 100)}%`
+                          : '0%'}
+                      </span>
+                      <span className="progress-step">
+                        步骤 {downloadProgress.current}/{downloadProgress.total}
+                      </span>
+                    </div>
+                    {downloadProgress.current_file && (
+                      <div className="current-file">
+                         {downloadProgress.current_file}
+                      </div>
+                    )}
+                    {downloadProgress.status === 'failed' && downloadProgress.error && (
+                      <div className="error-message" style={{ marginTop: '1rem' }}>
+                        {downloadProgress.error}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

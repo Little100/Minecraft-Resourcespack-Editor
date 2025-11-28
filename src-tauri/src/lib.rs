@@ -6,12 +6,15 @@ mod pack_creator;
 mod history_manager;
 mod version_downloader;
 mod preloader;
+mod download_manager;
 
 #[cfg(feature = "web-server")]
 mod web_server;
 
 use commands::*;
 use tauri::Manager;
+use download_manager::DownloadManager;
+use std::sync::Arc;
 
 #[cfg(feature = "web-server")]
 use web_server::{WebServerState, start_server, stop_server, get_server_status};
@@ -50,7 +53,32 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(AppState::default());
+        .manage(AppState::default())
+        .setup(|app| {
+            // 初始化日志系统
+            init_logging();
+            
+            // 初始化下载管理器
+            let download_manager = DownloadManager::new(app.handle().clone());
+            app.manage(Arc::new(download_manager));
+            
+            // 初始化窗口
+            let window = app.get_webview_window("main").unwrap();
+            
+            #[cfg(debug_assertions)]
+            {
+                window.open_devtools();
+            }
+            
+            // 亚克力效果
+            #[cfg(target_os = "windows")]
+            {
+                use window_vibrancy::apply_acrylic;
+                let _ = apply_acrylic(&window, Some((30, 30, 30, 125)));
+            }
+            
+            Ok(())
+        });
 
     #[cfg(feature = "web-server")]
     {
@@ -102,6 +130,12 @@ pub fn run() {
         load_language_map,
         get_sound_subtitles,
         search_files,
+        download_minecraft_sounds,
+        download_manager::get_all_download_tasks,
+        download_manager::get_download_task,
+        download_manager::cancel_download_task,
+        download_manager::delete_download_task,
+        download_manager::clear_completed_tasks,
         history_manager::save_file_history,
         history_manager::load_file_history,
         history_manager::get_history_stats,
@@ -114,28 +148,7 @@ pub fn run() {
         stop_server,
         #[cfg(feature = "web-server")]
         get_server_status,
-    ])
-        .setup(|app| {
-            // 初始化日志系统
-            init_logging();
-            
-            // 初始化
-            let window = app.get_webview_window("main").unwrap();
-            
-            #[cfg(debug_assertions)]
-            {
-                window.open_devtools();
-            }
-            
-            // 亚克力
-            #[cfg(target_os = "windows")]
-            {
-                use window_vibrancy::apply_acrylic;
-                let _ = apply_acrylic(&window, Some((30, 30, 30, 125)));
-            }
-            
-            Ok(())
-        });
+    ]);
 
     builder.run(tauri::generate_context!())
         .expect("error while running tauri application");

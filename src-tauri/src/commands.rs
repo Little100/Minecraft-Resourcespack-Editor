@@ -885,6 +885,7 @@ pub async fn download_and_extract_template(
     version_id: String,
     pack_path: String,
     keep_cache: bool,
+    manager: State<'_, std::sync::Arc<crate::download_manager::DownloadManager>>,
 ) -> Result<String, String> {
     // 获取temp目录
     let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
@@ -895,15 +896,40 @@ pub async fn download_and_extract_template(
         .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
     let output = Path::new(&pack_path);
+    
+    // 创建下载任务
+    let task_id = manager.create_task(
+        format!("下载模板: {}", version_id),
+        "template".to_string(),
+        output.to_path_buf(),
+    ).await;
+    
+    // 克隆管理器用于异步任务
+    let manager_clone = std::sync::Arc::clone(&manager);
+    let task_id_clone = task_id.clone();
+    let version_id_clone = version_id.clone();
+    let temp_dir_clone = temp_dir.clone();
+    let output_clone = output.to_path_buf();
 
-    // 下载并提取
-    crate::version_downloader::download_and_extract_version(
-        &version_id,
-        &temp_dir,
-        output,
-        keep_cache,
-    )
-    .await
+    // 在后台启动下载任务
+    tokio::spawn(async move {
+        let result = crate::version_downloader::download_and_extract_version_with_progress(
+            &version_id_clone,
+            &temp_dir_clone,
+            &output_clone,
+            keep_cache,
+            task_id_clone,
+            (*manager_clone).clone(),
+        )
+        .await;
+        
+        if let Err(e) = result {
+            println!("模板下载失败: {}", e);
+        }
+    });
+    
+    // 立即返回 task_id
+    Ok(format!("Task created|TASK_ID|{}", task_id))
 }
 
 /// 清理模板缓存
@@ -1638,4 +1664,76 @@ fn search_in_file(
     }
     
     Ok(results)
+}
+
+/// 下载声音资源
+#[tauri::command]
+pub async fn download_minecraft_sounds(
+    state: State<'_, AppState>,
+    manager: State<'_, std::sync::Arc<crate::download_manager::DownloadManager>>,
+    concurrent_downloads: Option<usize>,
+) -> Result<String, String> {
+    use std::sync::Arc;
+    
+    let output_dir = {
+        let pack_path = state.current_pack_path.lock().unwrap();
+        match pack_path.as_ref() {
+            Some(path) => path.clone(),
+            None => return Err("没有加载材质包".to_string()),
+        }
+    };
+    
+    // 创建下载任务
+    let task_id = manager.create_task(
+        "Minecraft 声音资源".to_string(),
+        "sounds".to_string(),
+        output_dir.clone(),
+    ).await;
+    
+    let manager_clone = Arc::clone(&manager);
+    let task_id_clone = task_id.clone();
+    
+    // 在后台启动下载任务
+    tokio::spawn(async move {
+        let result = crate::version_downloader::download_minecraft_sounds_with_progress(
+            &output_dir,
+            task_id_clone.clone(),
+            manager_clone.clone(),
+            concurrent_downloads.unwrap_or(32),
+        ).await;
+        
+        // 更新最终状态
+        match result {
+            Ok(_message) => {
+                let progress = crate::download_manager::DownloadProgress {
+                    task_id: task_id_clone.clone(),
+                    status: crate::download_manager::DownloadStatus::Completed,
+                    current: 100,
+                    total: 100,
+                    current_file: None,
+                    speed: 0.0,
+                    eta: None,
+                    error: None,
+                };
+                manager_clone.update_progress(&task_id_clone, progress).await;
+            }
+            Err(e) => {
+                let progress = crate::download_manager::DownloadProgress {
+                    task_id: task_id_clone.clone(),
+                    status: crate::download_manager::DownloadStatus::Failed,
+                    current: 0,
+                    total: 100,
+                    current_file: None,
+                    speed: 0.0,
+                    eta: None,
+                    error: Some(e),
+                };
+                manager_clone.update_progress(&task_id_clone, progress).await;
+            }
+        }
+        
+        // 移除取消令牌
+        manager_clone.remove_cancel_token(&task_id_clone).await;
+    });
+    Ok(task_id)
 }

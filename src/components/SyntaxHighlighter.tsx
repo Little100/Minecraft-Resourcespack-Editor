@@ -144,7 +144,7 @@ export default function SyntaxHighlighter({ code, language, scrollTop = 0, scrol
       console.log(`[性能-语法高亮]  计算tokens完成, 耗时: ${duration.toFixed(2)}ms, tokens数量: ${result.length}`);
       
       if (result.length > MAX_TOKENS) {
-        console.warn(`[性能-语法高亮] ⚠️ Token数量(${result.length})超过限制(${MAX_TOKENS}),已禁用语法高亮以提升性能`);
+        console.warn(`[性能-语法高亮] Token数量(${result.length})超过限制(${MAX_TOKENS}),已禁用语法高亮以提升性能`);
         console.warn(`[性能-语法高亮]  提示: 渲染${result.length}个DOM元素会导致严重卡顿,建议编辑较小的文件或使用纯文本模式`);
         return null;
       }
