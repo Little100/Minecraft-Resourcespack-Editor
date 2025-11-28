@@ -312,6 +312,27 @@ body.acrylic-enabled[data-theme="dark"] .tree-item.folder.expanded,
   background: rgba(59, 130, 246, 0.15);
 }
 
+.tree-item.context-selected {
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid var(--accent-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary);
+}
+
+[data-theme="dark"] .tree-item.context-selected {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: var(--accent-primary);
+}
+
+.tree-item.selected.context-selected {
+  background: var(--accent-light);
+  border: 1px solid var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+[data-theme="dark"] .tree-item.selected.context-selected {
+  background: rgba(59, 130, 246, 0.3);
+}
+
 .tree-item.folder {
   font-weight: 500;
 }
@@ -1025,8 +1046,8 @@ body.acrylic-enabled .editor-tab.active {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
-  padding: 0.4rem;
-  min-width: 220px;
+  padding: 0.25rem;
+  min-width: 200px;
   z-index: 10000;
   animation: contextMenuFadeIn 0.1s ease-out;
 }
@@ -1045,14 +1066,21 @@ body.acrylic-enabled .editor-tab.active {
 .context-menu-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  gap: 8px;
+  padding: 0.35rem 0.5rem;
   cursor: pointer;
   transition: all 0.1s ease;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: var(--text-primary);
   user-select: none;
   border-radius: var(--radius-sm);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.context-menu-item > span:not(.menu-icon) {
+  flex: 1;
+  text-align: left;
 }
 
 .context-menu-item:hover {
@@ -1076,22 +1104,23 @@ body.acrylic-enabled .editor-tab.active {
 
 .context-menu-item.danger:hover .menu-icon {
   color: white;
-}
-
 .menu-icon {
-  margin-right: 8px;
   width: 16px;
   height: 16px;
-  display: flex;
+  flex-shrink: 0;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text-secondary);
   transition: color 0.1s ease;
+  line-height: 0;
 }
 
 .menu-icon svg {
   width: 16px;
   height: 16px;
+  display: block;
+}
 }
 
 .context-menu-item.danger .menu-icon {
@@ -1099,11 +1128,7 @@ body.acrylic-enabled .editor-tab.active {
 }
 
 .menu-shortcut {
-  margin-left: auto;
-  font-size: 0.75rem;
-  color: var(--text-tertiary);
-  font-family: monospace;
-  transition: color 0.1s ease;
+  display: none;
 }
 
 .context-menu-divider {

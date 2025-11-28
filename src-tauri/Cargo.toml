@@ -48,7 +48,7 @@ default = ["web-server"]
 web-server = ["axum", "tower", "tower-http"]
 
 [profile.dev]
-opt-level = 1
+opt-level = 2
 incremental = true
 debug = true
 

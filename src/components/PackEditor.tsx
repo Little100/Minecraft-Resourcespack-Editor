@@ -57,6 +57,7 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set([""]));
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [contextMenuPath, setContextMenuPath] = useState<string | null>(null);
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
   const [fileTree, setFileTree] = useState<FileTreeNode | null>(null);
@@ -86,6 +87,7 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
   const [showSearchModal, setShowSearchModal] = useState<boolean>(false);
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState<boolean>(false);
+  const [soundsJsonExists, setSoundsJsonExists] = useState<boolean>(false);
   const fileTreeRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -432,6 +434,7 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
     const handleClickOutside = (event: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setContextMenu(null);
+        setContextMenuPath(null);
       }
       if (toolSizeMenuRef.current && !toolSizeMenuRef.current.contains(event.target as Node)) {
         setShowToolSizeMenu(false);
@@ -1018,12 +1021,49 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
     );
   };
 
-  const handleContextMenu = (e: React.MouseEvent, path: string, type: 'file' | 'folder') => {
+  const handleContextMenu = async (e: React.MouseEvent, path: string, type: 'file' | 'folder') => {
     e.preventDefault();
     e.stopPropagation();
+    
+    setContextMenuPath(path);
+    
+    if (path === 'assets/minecraft/sounds') {
+      try {
+        const soundsJsonPath = `${path}/sounds.json`;
+        await invoke('read_file_content', { filePath: soundsJsonPath });
+        setSoundsJsonExists(true);
+      } catch {
+        setSoundsJsonExists(false);
+      }
+    }
+    
+    const menuWidth = 200;
+    const estimatedItemHeight = 32;
+    const estimatedItemCount = type === 'folder' ? 9 : 5;
+    const menuHeight = estimatedItemCount * estimatedItemHeight + 10;
+    
+    let x = e.clientX;
+    let y = e.clientY;
+    
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    
+    if (y + menuHeight > window.innerHeight) {
+      y = window.innerHeight - menuHeight - 10;
+    }
+    
+    if (y < 10) {
+      y = 10;
+    }
+    
+    if (x < 10) {
+      x = 10;
+    }
+    
     setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
+      x,
+      y,
       path,
       type,
     });
@@ -1132,6 +1172,32 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
         setPngCreatorFolder(contextMenu.path);
         setShowPngCreator(true);
         break;
+      case 'newSoundsJson':
+        try {
+          const filePath = contextMenu.path ? `${contextMenu.path}/sounds.json` : 'sounds.json';
+          
+          const packPath = await invoke<string>('get_current_pack_path');
+          const fullPath = `${packPath}/${filePath}`;
+          
+          try {
+            await invoke('read_file_content', { filePath: filePath });
+            alert('sounds.json 文件已存在！');
+            openFileInTab(filePath);
+            break;
+          } catch {}
+          
+          const defaultContent = JSON.stringify({}, null, 2);
+          await invoke('create_new_file', {
+            filePath: filePath,
+            content: defaultContent
+          });
+          await refreshFileTree();
+          // 自动打开创建的文件
+          openFileInTab(filePath);
+        } catch (error) {
+          alert(`创建 sounds.json 失败: ${error}`);
+        }
+        break;
       case 'copy':
         console.log('复制:', contextMenu.path);
         break;
@@ -1141,6 +1207,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
     }
     
     setContextMenu(null);
+    setContextMenuPath(null);
   };
 
   const handleCreatePng = async (width: number, height: number, fileName: string) => {
@@ -1227,7 +1294,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
       return (
         <div className="tree-node">
           <div
-            className={`tree-item folder ${isExpanded ? 'expanded' : ''}`}
+            className={`tree-item folder ${isExpanded ? 'expanded' : ''} ${contextMenuPath === currentPath ? 'context-selected' : ''}`}
             style={{ paddingLeft: `${level * 20 + 24}px` }}
             onClick={(e) => {
               if (!isRenaming) toggleFolder(currentPath, node);
@@ -1291,7 +1358,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
     } else {
       return (
         <div
-          className={`tree-item file ${selectedFile === currentPath ? "selected" : ""}`}
+          className={`tree-item file ${selectedFile === currentPath ? "selected" : ""} ${contextMenuPath === currentPath ? 'context-selected' : ''}`}
           style={{ paddingLeft: `${level * 20 + 24}px` }}
           onClick={(e) => {
             if (!isRenaming) openFileInTab(currentPath);
@@ -1542,7 +1609,6 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
               <div className="context-menu-item" onClick={() => handleMenuAction('newFile')}>
                 <span className="menu-icon"><NewFileIcon /></span>
                 <span>新建文件</span>
-                <span className="menu-shortcut">Ctrl+N</span>
               </div>
               <div className="context-menu-item" onClick={() => handleMenuAction('newFolder')}>
                 <span className="menu-icon"><NewFolderIcon /></span>
@@ -1552,31 +1618,40 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
                 <span className="menu-icon"><ImageIcon /></span>
                 <span>新增PNG图片</span>
               </div>
+              {/* sounds*/}
+              {contextMenu.path === 'assets/minecraft/sounds' && !soundsJsonExists && (
+                <div className="context-menu-item" onClick={() => handleMenuAction('newSoundsJson')}>
+                  <span className="menu-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 18V5l12-2v13"></path>
+                      <circle cx="6" cy="18" r="3"></circle>
+                      <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                  </span>
+                  <span>创建 sounds.json</span>
+                </div>
+              )}
               <div className="context-menu-divider"></div>
             </>
           )}
           <div className="context-menu-item" onClick={() => handleMenuAction('rename')}>
             <span className="menu-icon"><RenameIcon /></span>
             <span>重命名</span>
-            <span className="menu-shortcut">F2</span>
           </div>
           <div className="context-menu-item" onClick={() => handleMenuAction('copy')}>
             <span className="menu-icon"><CopyIcon /></span>
             <span>复制</span>
-            <span className="menu-shortcut">Ctrl+C</span>
           </div>
           {contextMenu.type === 'folder' && (
             <div className="context-menu-item" onClick={() => handleMenuAction('paste')}>
               <span className="menu-icon"><PasteIcon /></span>
               <span>粘贴</span>
-              <span className="menu-shortcut">Ctrl+V</span>
             </div>
           )}
           <div className="context-menu-divider"></div>
           <div className="context-menu-item danger" onClick={() => handleMenuAction('delete')}>
             <span className="menu-icon"><DeleteIcon /></span>
             <span>删除</span>
-            <span className="menu-shortcut">Delete</span>
           </div>
         </div>
       )}

@@ -1135,6 +1135,47 @@ pub async fn load_language_map(state: State<'_, AppState>) -> Result<std::collec
     Ok(map)
 }
 
+/// 音效条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoundEntry {
+    pub key: String,
+    pub translation: String,
+    pub category: String,
+}
+
+/// 获取所有音效列表
+#[tauri::command]
+pub async fn get_sound_subtitles(state: State<'_, AppState>) -> Result<Vec<SoundEntry>, String> {
+    // 加载语言映射表
+    let language_map = load_language_map(state).await?;
+    
+    // 过滤键
+    let mut sound_entries: Vec<SoundEntry> = language_map
+        .iter()
+        .filter(|(key, _)| key.starts_with("subtitles."))
+        .map(|(key, translation)| {
+            let category = key
+                .strip_prefix("subtitles.")
+                .and_then(|s| s.split('.').next())
+                .unwrap_or("other")
+                .to_string();
+            
+            SoundEntry {
+                key: key.clone(),
+                translation: translation.clone(),
+                category,
+            }
+        })
+        .collect();
+    
+    // 按分类和键排序
+    sound_entries.sort_by(|a, b| {
+        a.category.cmp(&b.category).then(a.key.cmp(&b.key))
+    });
+    
+    Ok(sound_entries)
+}
+
 /// 读取最新的日志
 async fn read_latest_logs() -> Vec<DebugLog> {
     let exe_path = match std::env::current_exe() {
