@@ -36,6 +36,8 @@ export default function CreatePackModal({
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string>("");
   const [versionFilter, setVersionFilter] = useState<"release" | "snapshot" | "all">("release");
+  const [showLangFallbackDialog, setShowLangFallbackDialog] = useState(false);
+  const [langFallbackInfo, setLangFallbackInfo] = useState<{ requestedVersion: string; usedVersion: string } | null>(null);
 
   // 颜色代码映射
   const COLOR_CODES = [
@@ -186,7 +188,19 @@ export default function CreatePackModal({
       // 下载并提取模板
       if (selectedVersion) {
         setStep(3); // 显示进度
-        await downloadAndExtractTemplate(selectedVersion, fullPath, templateCacheEnabled);
+        const result = await downloadAndExtractTemplate(selectedVersion, fullPath, templateCacheEnabled);
+        
+        // 检查是否使用了回退版本
+        if (result && result.includes('|LANG_FALLBACK|')) {
+          const parts = result.split('|LANG_FALLBACK|');
+          const usedVersion = parts[1];
+          setLangFallbackInfo({
+            requestedVersion: selectedVersion,
+            usedVersion: usedVersion
+          });
+          setShowLangFallbackDialog(true);
+          return;
+        }
       }
 
       onSuccess();
@@ -421,6 +435,41 @@ export default function CreatePackModal({
             </div>
           )}
         </div>
+
+        {/* 语言文件回退提示对话框 */}
+        {showLangFallbackDialog && langFallbackInfo && (
+          <div className="lang-fallback-overlay">
+            <div className="lang-fallback-dialog">
+              <div className="lang-fallback-header">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <h3>语言文件提示</h3>
+              </div>
+              <div className="lang-fallback-content">
+                <p>
+                  <strong>未找到 {langFallbackInfo.requestedVersion} 的中文文件</strong>
+                </p>
+                <p>
+                  已经切换到最新版 <strong>{langFallbackInfo.usedVersion}</strong> 进行映射
+                </p>
+              </div>
+              <div className="lang-fallback-actions">
+                <button
+                  className="btn-sm btn-primary"
+                  onClick={() => {
+                    setShowLangFallbackDialog(false);
+                    onSuccess();
+                  }}
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

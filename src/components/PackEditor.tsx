@@ -1495,10 +1495,15 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
       {/* 搜索模态框 */}
       {showSearchModal && (
         <SearchModal
-          onClose={() => setShowSearchModal(false)}
+          onClose={() => {
+            setShowSearchModal(false);
+            setSearchResults(null);
+            setIsSearching(false);
+          }}
           onResultClick={(filePath, lineNumber) => {
             openFileInTab(filePath, false, lineNumber);
             setShowSearchModal(false);
+            setSearchResults(null);
           }}
           onSearch={async (query, caseSensitive, useRegex) => {
             if (!query.trim()) {

@@ -268,8 +268,9 @@ pub fn extract_assets_from_jar(jar_path: &Path, output_dir: &Path) -> Result<(),
 /// 下载语言文件
 async fn download_language_file(
     version_url: &str,
+    version_id: &str,
     output_dir: &Path,
-) -> Result<(), String> {
+) -> Result<(bool, bool, String), String> {
     use std::collections::HashMap;
     
     // 获取版本详细信息
@@ -287,7 +288,7 @@ async fn download_language_file(
         Some(index) => index,
         None => {
             println!("No assetIndex found, skipping language file download");
-            return Ok(());
+            return Ok((false, false, version_id.to_string()));
         }
     };
     
@@ -309,8 +310,22 @@ async fn download_language_file(
     let lang_asset = match assets.get(lang_key) {
         Some(asset) => asset,
         None => {
-            println!("Chinese language file not found in asset index, skipping");
-            return Ok(());
+            // 如果当前版本没有中文文件使用最新 release版本
+            println!("Chinese language file not found for version {}, trying latest release", version_id);
+            
+            // 获取版本清单
+            let manifest = fetch_version_manifest().await?;
+            let latest_version = manifest.versions
+                .iter()
+                .find(|v| v.id == manifest.latest.release)
+                .ok_or("Latest release version not found")?;
+            
+            if latest_version.id == version_id {
+                return Err(format!("Chinese language file not found for version {} and latest release", version_id));
+            }
+            
+            return Box::pin(download_language_file(&latest_version.url, &latest_version.id, output_dir)).await
+                .map(|(success, _, _)| (success, true, latest_version.id.clone()));
         }
     };
     
@@ -341,17 +356,17 @@ async fn download_language_file(
     std::fs::write(&map_json_path, &content)
         .map_err(|e| format!("Failed to write map.json: {}", e))?;
     
-    // 保存到 assets/minecraft/lang/zh_cn.json
+    // 保存到 assets/minecraft/lang/zh_cn.lang
     let lang_dir = output_dir.join("assets").join("minecraft").join("lang");
     std::fs::create_dir_all(&lang_dir)
         .map_err(|e| format!("Failed to create lang directory: {}", e))?;
     
-    let zh_cn_path = lang_dir.join("zh_cn.json");
+    let zh_cn_path = lang_dir.join("zh_cn.lang");
     std::fs::write(&zh_cn_path, &content)
-        .map_err(|e| format!("Failed to write zh_cn.json: {}", e))?;
+        .map_err(|e| format!("Failed to write zh_cn.lang: {}", e))?;
     
-    println!("Successfully downloaded and saved language file");
-    Ok(())
+    println!("Successfully downloaded and saved language file for version {}", version_id);
+    Ok((true, false, version_id.to_string()))
 }
 
 /// 下载版本并提取assets
@@ -374,18 +389,29 @@ pub async fn download_and_extract_version(
     // 提取assets
     extract_assets_from_jar(Path::new(&jar_path), output_dir)?;
     
-    // 下载语言文件
-    if let Err(e) = download_language_file(&version.url, output_dir).await {
-        println!("Warning: Failed to download language file: {}", e);
-        // 不中断流程，继续执行
-    }
+    // 下载语言文件并返回结果
+    let lang_result = download_language_file(&version.url, version_id, output_dir).await;
+    
+    let result_message = match lang_result {
+        Ok((_, used_latest, actual_version)) => {
+            if used_latest {
+                format!("Successfully extracted assets from version {}|LANG_FALLBACK|{}", version_id, actual_version)
+            } else {
+                format!("Successfully extracted assets from version {}", version_id)
+            }
+        },
+        Err(e) => {
+            println!("Warning: Failed to download language file: {}", e);
+            format!("Successfully extracted assets from version {}", version_id)
+        }
+    };
     
     // 根据设置决定是否删除jar文件
     if !keep_cache {
         std::fs::remove_file(&jar_path).ok();
     }
     
-    Ok(format!("Successfully extracted assets from version {}", version_id))
+    Ok(result_message)
 }
 
 /// 清理缓存的jar文件

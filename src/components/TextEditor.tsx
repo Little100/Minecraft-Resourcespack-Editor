@@ -38,8 +38,9 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const originalContent = useRef(content);
   
-  // 检测文件类型
-  const isJSON = filePath.toLowerCase().endsWith('.json') || filePath.toLowerCase().endsWith('.mcmeta');
+  const isJSON = filePath.toLowerCase().endsWith('.json') ||
+                 filePath.toLowerCase().endsWith('.mcmeta') ||
+                 filePath.toLowerCase().endsWith('.lang');
 
   useEffect(() => {
     setText(content);
