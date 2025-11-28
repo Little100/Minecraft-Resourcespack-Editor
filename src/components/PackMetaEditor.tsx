@@ -698,9 +698,15 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       <div className={`packmeta-content view-${viewMode}`}>
         <div className="source-panel">
           <div className="editor-container" ref={editorContainerRef}>
-            <div className="line-numbers" style={{ fontSize: `${fontSize}px` }}>
+            <div className="line-numbers" style={{
+              fontSize: `${fontSize}px`,
+              lineHeight: '1.5'
+            }}>
               {lineNumbers.map((num) => (
-                <div key={num} className="line-number" style={{ height: `${fontSize * 1.5}px` }}>
+                <div key={num} className="line-number" style={{
+                  height: `${fontSize * 1.5}px`,
+                  lineHeight: `${fontSize * 1.5}px`
+                }}>
                   {num}
                 </div>
               ))}

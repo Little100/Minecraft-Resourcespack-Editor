@@ -18,8 +18,9 @@ body.acrylic-enabled .editor-sidebar {
   border-right: 1px solid rgba(0, 0, 0, 0.05);
 }
 
+body.acrylic-enabled[data-theme="dark"] .editor-sidebar,
 [data-theme="dark"] body.acrylic-enabled .editor-sidebar {
-  background-color: rgba(20, 20, 23, 0.6);
+  background-color: rgba(20, 20, 23, 0.4);
   border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -204,29 +205,21 @@ body.acrylic-enabled .color-input {
 
 [data-theme="dark"] .tree-item.folder {
   background: var(--bg-secondary);
-}
-body.acrylic-enabled .tree-item.folder {
-  background: rgba(var(--bg-secondary-rgb), 0.6) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
+body.acrylic-enabled .tree-item.folder,
 body.acrylic-enabled .tree-item.folder.expanded {
-  background: rgba(var(--bg-secondary-rgb), 0.6) !important;
+  background: rgba(var(--bg-secondary-rgb), 0.6);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
 }
 
-[data-theme="dark"] body.acrylic-enabled .tree-item.folder {
-  background: rgba(39, 39, 42, 0.1) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-
+body.acrylic-enabled[data-theme="dark"] .tree-item.folder,
+[data-theme="dark"] body.acrylic-enabled .tree-item.folder,
+body.acrylic-enabled[data-theme="dark"] .tree-item.folder.expanded,
 [data-theme="dark"] body.acrylic-enabled .tree-item.folder.expanded {
-  background: rgba(39, 39, 42, 0.1) !important;
+  background: rgba(30, 30, 35, 0.4);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+}
 }
 
 .tree-node {

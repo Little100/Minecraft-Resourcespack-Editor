@@ -587,6 +587,7 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
           className="line-numbers"
           style={{
             fontSize: `${fontSize}px`,
+            lineHeight: '1.5',
             transform: `translateY(-${scrollTop}px)`,
             willChange: 'transform',
             height: `${lineCount * fontSize * 1.5 + 32}px`,
@@ -597,7 +598,10 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
             <div
               key={num}
               className={`line-number ${highlightedLine === num ? 'highlighted' : ''}`}
-              style={{ height: `${fontSize * 1.5}px` }}
+              style={{
+                height: `${fontSize * 1.5}px`,
+                lineHeight: `${fontSize * 1.5}px`
+              }}
             >
               {num}
             </div>

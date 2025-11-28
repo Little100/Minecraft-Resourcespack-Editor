@@ -100,10 +100,9 @@ body.acrylic-mode .editor-header-info {
 .line-numbers {
   background: var(--bg-secondary);
   color: var(--text-tertiary);
-  padding: 1rem 0.5rem;
+  padding: 16px 8px;
   text-align: right;
   font-family: inherit;
-  line-height: 1.5;
   user-select: none;
   border-right: 1px solid var(--border-color);
   min-width: 50px;
@@ -118,7 +117,6 @@ body.acrylic-mode .line-numbers {
 }
 
 .line-number {
-  line-height: 1.5;
   position: relative;
 }
 
@@ -172,7 +170,7 @@ body.acrylic-mode .editor-content-wrapper {
   position: relative;
   width: 100%;
   height: 100%;
-  padding: 1rem;
+  padding: 16px;
   background: transparent;
   border: none;
   outline: none !important;

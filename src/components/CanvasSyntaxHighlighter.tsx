@@ -157,7 +157,7 @@ export default function CanvasSyntaxHighlighter({
     const startTime = performance.now();
     const result = tokenizeJSON(code);
     const duration = performance.now() - startTime;
-    console.log(`[Canvas-语法高亮] ✅ Token计算完成, 耗时: ${duration.toFixed(2)}ms, tokens: ${result.length}`);
+    console.log(`[Canvas-语法高亮]  Token计算完成, 耗时: ${duration.toFixed(2)}ms, tokens: ${result.length}`);
     return result;
   }, [code, language]);
 
@@ -186,6 +186,7 @@ export default function CanvasSyntaxHighlighter({
 
       ctx.font = `${fontSize}px Consolas, Monaco, "Courier New", monospace`;
       ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
 
       const paddingTop = 16;
       const paddingLeft = 16;
@@ -200,6 +201,7 @@ export default function CanvasSyntaxHighlighter({
       // 绘制缩进引导线
       const indentGuideColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
       const lines = code.split('\n');
+      // 测量空格宽度
       const spaceWidth = ctx.measureText(' ').width;
       
       for (let lineNum = startLine; lineNum <= Math.min(endLine, lines.length - 1); lineNum++) {
@@ -228,6 +230,8 @@ export default function CanvasSyntaxHighlighter({
         }
       }
 
+      const leadingSpace = (lineHeightPx - fontSize) / 2;
+
       // 遍历所有tokens并渲染
       let currentLine = 0;
       let currentX = 0;
@@ -254,14 +258,14 @@ export default function CanvasSyntaxHighlighter({
         }
 
         // 计算渲染位置
-        const y = token.line * lineHeightPx + paddingTop - scrollTop;
+        const y = token.line * lineHeightPx + paddingTop - scrollTop + leadingSpace;
         const x = paddingLeft + currentX - scrollLeft;
 
         // 绘制token
         ctx.fillStyle = colors[token.type] || colors.text;
         ctx.fillText(token.value, x, y);
 
-        // 更新x坐标
+        // 更新x坐标 
         currentX += ctx.measureText(token.value).width;
       }
     };
