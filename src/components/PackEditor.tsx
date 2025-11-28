@@ -6,12 +6,13 @@ import TextEditor from "./TextEditor";
 import ImageViewer from "./ImageViewer";
 import PackMetaEditor from "./PackMetaEditor";
 import PngCreatorDialog from "./PngCreatorDialog";
+import SearchModal from "./SearchModal";
 import TitleBar from "./TitleBar";
-import { readFileContent, writeFileContent } from "../utils/tauri-api";
+import { readFileContent, writeFileContent, searchFiles, type SearchResponse } from "../utils/tauri-api";
 import {
   FolderIcon, FolderOpenIcon, FileIcon, NewFileIcon,
   NewFolderIcon, ImageIcon, RenameIcon, CopyIcon,
-  PasteIcon, DeleteIcon
+  PasteIcon, DeleteIcon, SearchIcon
 } from "./Icons";
 
 interface FileTreeNode {
@@ -42,6 +43,7 @@ interface OpenTab {
   isDirty: boolean;
   canvasData?: string;
   forceTextMode?: boolean;
+  initialLine?: number;
 }
 
 interface ImageInfo {
@@ -81,6 +83,9 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
   const [language, setLanguage] = useState<'en' | 'zh'>('en');
   const [languageMap, setLanguageMap] = useState<Record<string, string>>({});
   const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
+  const [showSearchModal, setShowSearchModal] = useState<boolean>(false);
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  const [isSearching, setIsSearching] = useState<boolean>(false);
   const fileTreeRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -512,44 +517,57 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
       setIsLoading(false);
     }
   }, []);
-
-  const openFileInTab = useCallback(async (filePath: string, forceTextMode: boolean = false) => {
-    console.log(`[性能-打开文件]  开始: ${filePath}`);
-    const startTime = performance.now();
+const openFileInTab = useCallback(async (filePath: string, forceTextMode: boolean = false, lineNumber?: number) => {
+  console.log(`[性能-打开文件]  开始: ${filePath}${lineNumber ? ` (行号: ${lineNumber})` : ''}`);
+  const startTime = performance.now();
+  
+  const existingTabIndex = openTabs.findIndex(tab => tab.path === filePath);
+  
+  if (existingTabIndex >= 0) {
+    const duration = (performance.now() - startTime).toFixed(2);
+    console.log(`[性能-打开文件]  切换到已打开的标签! 耗时: ${duration}ms`);
     
-    const existingTabIndex = openTabs.findIndex(tab => tab.path === filePath);
+    const newTabs = [...openTabs];
+    let needsUpdate = false;
     
-    if (existingTabIndex >= 0) {
-      const duration = (performance.now() - startTime).toFixed(2);
-      console.log(`[性能-打开文件]  切换到已打开的标签! 耗时: ${duration}ms`);
+    if (forceTextMode && !openTabs[existingTabIndex].forceTextMode) {
+      newTabs[existingTabIndex] = {
+        ...newTabs[existingTabIndex],
+        forceTextMode: true
+      };
+      needsUpdate = true;
       
-      if (forceTextMode && !openTabs[existingTabIndex].forceTextMode) {
-        const newTabs = [...openTabs];
-        newTabs[existingTabIndex] = {
-          ...newTabs[existingTabIndex],
-          forceTextMode: true
-        };
-        
-        if (!newTabs[existingTabIndex].content) {
-          try {
-            const content = await readFileContent(filePath);
-            newTabs[existingTabIndex].content = content;
-          } catch (error) {
-            console.error('加载文件内容失败:', error);
-          }
+      if (!newTabs[existingTabIndex].content) {
+        try {
+          const content = await readFileContent(filePath);
+          newTabs[existingTabIndex].content = content;
+        } catch (error) {
+          console.error('加载文件内容失败:', error);
         }
-        
-        setOpenTabs(newTabs);
       }
-      
-      setActiveTabIndex(existingTabIndex);
-      setCurrentFileHasChanges(false);
-      
-      return;
     }
     
-    // 检查是否是图片
-    const ext = filePath.split('.').pop()?.toLowerCase();
+    // 更新行号
+    if (lineNumber !== undefined) {
+      newTabs[existingTabIndex] = {
+        ...newTabs[existingTabIndex],
+        initialLine: lineNumber
+      };
+      needsUpdate = true;
+    }
+    
+    if (needsUpdate) {
+      setOpenTabs(newTabs);
+    }
+    
+    setActiveTabIndex(existingTabIndex);
+    setCurrentFileHasChanges(false);
+    
+    return;
+  }
+  
+  // 检查是否是图片
+  const ext = filePath.split('.').pop()?.toLowerCase();
     const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext || '');
     
     console.log(`[性能-打开文件] 文件类型: ${isImage ? '图片' : '文本'}, 强制文本模式: ${forceTextMode}`);
@@ -575,6 +593,7 @@ export default function PackEditor({ packInfo, onClose, debugMode = false }: Pac
       content: content,
       isDirty: false,
       forceTextMode: forceTextMode,
+      initialLine: lineNumber,
     };
     
     setOpenTabs([...openTabs, newTab]);
@@ -944,6 +963,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
     }
 
     if (['json', 'txt', 'md', 'yml', 'yaml'].includes(extension)) {
+      const currentTab = openTabs[activeTabIndex];
       return (
         <TextEditor
           content={fileContent}
@@ -955,6 +975,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
             markTabAsSaved();
           }}
           readOnly={false}
+          initialLine={currentTab?.initialLine}
         />
       );
     }
@@ -973,6 +994,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
             markTabAsSaved();
           }}
           readOnly={false}
+          initialLine={currentTab?.initialLine}
         />
       );
     }
@@ -1383,6 +1405,13 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
             >
               {language === 'en' ? '英' : '中'}
             </button>
+            <button
+              className="btn-icon"
+              onClick={() => setShowSearchModal(true)}
+              title="搜索 (Ctrl+F)"
+            >
+              <SearchIcon className="tree-icon" />
+            </button>
             <button className="btn-icon" onClick={refreshFileTree} title="刷新">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
@@ -1460,6 +1489,36 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
           folderPath={pngCreatorFolder}
           onClose={() => setShowPngCreator(false)}
           onConfirm={handleCreatePng}
+        />
+      )}
+
+      {/* 搜索模态框 */}
+      {showSearchModal && (
+        <SearchModal
+          onClose={() => setShowSearchModal(false)}
+          onResultClick={(filePath, lineNumber) => {
+            openFileInTab(filePath, false, lineNumber);
+            setShowSearchModal(false);
+          }}
+          onSearch={async (query, caseSensitive, useRegex) => {
+            if (!query.trim()) {
+              setSearchResults(null);
+              return;
+            }
+            
+            setIsSearching(true);
+            try {
+              const results = await searchFiles(query, caseSensitive, useRegex);
+              setSearchResults(results);
+            } catch (error) {
+              console.error('搜索失败:', error);
+              alert(`搜索失败: ${error}`);
+            } finally {
+              setIsSearching(false);
+            }
+          }}
+          searchResults={searchResults}
+          isSearching={isSearching}
         />
       )}
 

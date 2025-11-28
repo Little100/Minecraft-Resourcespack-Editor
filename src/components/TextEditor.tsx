@@ -11,6 +11,7 @@ interface TextEditorProps {
   onChange?: (content: string) => void;
   onSave?: () => void;
   readOnly?: boolean;
+  initialLine?: number;
 }
 
 interface ContextMenu {
@@ -19,7 +20,7 @@ interface ContextMenu {
   hasSelection: boolean;
 }
 
-export default function TextEditor({ content, filePath, onChange, onSave, readOnly = false }: TextEditorProps) {
+export default function TextEditor({ content, filePath, onChange, onSave, readOnly = false, initialLine }: TextEditorProps) {
   const [text, setText] = useState(content);
   const [lineCount, setLineCount] = useState(1);
   const [isDirty, setIsDirty] = useState(false);
@@ -31,6 +32,7 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -47,6 +49,40 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
     setHistoryIndex(0);
     setIsDirty(false);
   }, [filePath]);
+
+  // 跳转到指定行
+  useEffect(() => {
+    if (textareaRef.current && initialLine && initialLine > 0) {
+      const textarea = textareaRef.current;
+      const lines = text.split('\n');
+      
+      // 确保行号在有效范围内
+      const targetLine = Math.min(initialLine, lines.length);
+      
+      // 计算目标行的字符偏移量
+      let charOffset = 0;
+      for (let i = 0; i < targetLine - 1; i++) {
+        charOffset += lines[i].length + 1;
+      }
+      
+      // 设置光标位置到目标行的开头
+      textarea.focus();
+      textarea.setSelectionRange(charOffset, charOffset);
+      
+      const lineHeight = fontSize * 1.5;
+      const targetScrollTop = (targetLine - 1) * lineHeight - (textarea.clientHeight / 2) + (lineHeight / 2);
+      textarea.scrollTop = Math.max(0, targetScrollTop);
+      
+      // 设置高亮效果
+      setHighlightedLine(targetLine);
+      
+      const timer = setTimeout(() => {
+        setHighlightedLine(null);
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [initialLine, text, fontSize]);
 
   // 加载历史记录
   useEffect(() => {
@@ -163,7 +199,7 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
   };
 
   // 删除历史记录
-  const deleteHistoryEntry = async (entry: any, index: number) => {
+  const deleteHistoryEntry = async (entry: any) => {
     try {
       const packDir = await invoke<string>('get_current_pack_path');
       await invoke('delete_file_history', {
@@ -558,7 +594,11 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
           }}
         >
           {lineNumbers.map((num) => (
-            <div key={num} className="line-number" style={{ height: `${fontSize * 1.5}px` }}>
+            <div
+              key={num}
+              className={`line-number ${highlightedLine === num ? 'highlighted' : ''}`}
+              style={{ height: `${fontSize * 1.5}px` }}
+            >
               {num}
             </div>
           ))}
@@ -690,7 +730,7 @@ export default function TextEditor({ content, filePath, onChange, onSave, readOn
                           </button>
                           <button
                             className="btn-delete"
-                            onClick={() => deleteHistoryEntry(entry, index)}
+                            onClick={() => deleteHistoryEntry(entry)}
                             title="删除此历史记录"
                           >
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

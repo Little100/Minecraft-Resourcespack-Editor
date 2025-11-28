@@ -8,6 +8,7 @@ use rayon::prelude::*;
 pub struct ImagePreloader {
     cache: Arc<DashMap<String, Vec<u8>>>,
     loading: Arc<RwLock<HashSet<String>>>,
+    #[allow(dead_code)]
     max_cache_size: usize,
     current_folder: Arc<RwLock<Option<PathBuf>>>,
 }
@@ -123,6 +124,7 @@ impl ImagePreloader {
         Ok(images)
     }
     
+    #[allow(dead_code)]
     pub async fn get_cached(&self, relative_path: &str) -> Option<Vec<u8>> {
         self.cache.get(relative_path).map(|entry| entry.value().clone())
     }

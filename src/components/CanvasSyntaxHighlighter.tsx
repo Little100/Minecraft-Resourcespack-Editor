@@ -197,6 +197,37 @@ export default function CanvasSyntaxHighlighter({
       const startLine = Math.max(0, Math.floor((scrollTop) / lineHeightPx));
       const endLine = Math.ceil((scrollTop + rect.height) / lineHeightPx) + 1;
 
+      // 绘制缩进引导线
+      const indentGuideColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+      const lines = code.split('\n');
+      const spaceWidth = ctx.measureText(' ').width;
+      
+      for (let lineNum = startLine; lineNum <= Math.min(endLine, lines.length - 1); lineNum++) {
+        const line = lines[lineNum];
+        const y = lineNum * lineHeightPx + paddingTop - scrollTop;
+        
+        // 计算缩进级别
+        let indentLevel = 0;
+        for (let i = 0; i < line.length; i += 2) {
+          if (line[i] === ' ' && line[i + 1] === ' ') {
+            indentLevel++;
+          } else {
+            break;
+          }
+        }
+        
+        // 绘制缩进引导线
+        ctx.strokeStyle = indentGuideColor;
+        ctx.lineWidth = 1;
+        for (let i = 1; i <= indentLevel; i++) {
+          const x = paddingLeft + (i * 2 * spaceWidth) - scrollLeft;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, y + lineHeightPx);
+          ctx.stroke();
+        }
+      }
+
       // 遍历所有tokens并渲染
       let currentLine = 0;
       let currentX = 0;

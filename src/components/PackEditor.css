@@ -199,16 +199,34 @@ body.acrylic-enabled .color-input {
 
 .tree-item.folder.expanded {
   z-index: 11;
+  background: var(--bg-secondary);
 }
 
 [data-theme="dark"] .tree-item.folder {
   background: var(--bg-secondary);
 }
-
 body.acrylic-enabled .tree-item.folder {
-  background: rgba(var(--bg-secondary-rgb), 0.95);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(var(--bg-secondary-rgb), 0.6) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+body.acrylic-enabled .tree-item.folder.expanded {
+  background: rgba(var(--bg-secondary-rgb), 0.6) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="dark"] body.acrylic-enabled .tree-item.folder {
+  background: rgba(39, 39, 42, 0.1) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+[data-theme="dark"] body.acrylic-enabled .tree-item.folder.expanded {
+  background: rgba(39, 39, 42, 0.1) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .tree-node {

@@ -1,3 +1,4 @@
+// 我也不知道为什么突然这个文件在我的前端怎么都读取不了...所以加了这一行注释重新读取
 export function createGPUContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   const ctx = canvas.getContext('2d', {
     alpha: true,

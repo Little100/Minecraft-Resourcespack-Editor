@@ -100,6 +100,7 @@ pub fn run() {
         get_debug_info,
         open_logs_folder,
         load_language_map,
+        search_files,
         history_manager::save_file_history,
         history_manager::load_file_history,
         history_manager::get_history_stats,

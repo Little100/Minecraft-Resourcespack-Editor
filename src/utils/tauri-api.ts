@@ -120,9 +120,7 @@ export async function selectFolder(): Promise<string | null> {
 }
 
 // 保存文件对话框
-export async function saveFileDialog(
-  defaultName: string = "resource-pack.zip"
-): Promise<string | null> {
+export async function saveFileDialog(): Promise<string | null> {
   const selected = await open({
     multiple: false,
     filters: [
@@ -287,4 +285,31 @@ export async function downloadAndExtractTemplate(
 // 清理模板缓存
 export async function clearTemplateCache(): Promise<void> {
   return await invoke<void>("clear_template_cache");
+}
+
+export interface SearchResult {
+  file_path: string;
+  match_type: string;
+  line_number?: number;
+  line_content?: string;
+  match_start?: number;
+  match_end?: number;
+}
+
+export interface SearchResponse {
+  filename_matches: SearchResult[];
+  content_matches: SearchResult[];
+  total_count: number;
+}
+
+export async function searchFiles(
+  query: string,
+  caseSensitive: boolean,
+  useRegex: boolean
+): Promise<SearchResponse> {
+  return await invoke<SearchResponse>("search_files", {
+    query,
+    caseSensitive,
+    useRegex,
+  });
 }

@@ -227,20 +227,24 @@
 .indent-guides-container {
   position: absolute;
   top: 12px;
-  left: 0;
-  width: 100%;
-  height: 100%;
+  left: 12px;
+  width: calc(100% - 24px);
+  height: calc(100% - 24px);
   pointer-events: none;
   z-index: 1;
-  overflow: visible;
-  font-family: inherit;
+  overflow: hidden;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
 .indent-guide {
   position: absolute;
   width: 1px;
-  background: rgba(128, 128, 128, 0.35);
+  background: rgba(128, 128, 128, 0.2);
   pointer-events: none;
+}
+
+[data-theme="dark"] .indent-guide {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .editor-textarea {
@@ -252,7 +256,7 @@
   border: none;
   color: transparent;
   caret-color: var(--text-primary);
-  font-family: inherit;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: inherit;
   line-height: 1.5;
   resize: none;
@@ -261,10 +265,22 @@
   overflow: auto;
   tab-size: 2;
   z-index: 3;
+  letter-spacing: normal;
+  word-spacing: normal;
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  -webkit-text-fill-color: transparent;
 }
 
 .editor-textarea::selection {
-  background: rgba(38, 79, 120, 0.6);
+  background-color: rgba(59, 130, 246, 0.3);
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.editor-textarea::-moz-selection {
+  background-color: rgba(59, 130, 246, 0.3);
+  color: transparent;
 }
 
 .editor-textarea::-webkit-scrollbar {

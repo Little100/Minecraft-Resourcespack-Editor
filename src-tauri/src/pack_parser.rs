@@ -75,6 +75,7 @@ impl MinecraftVersion {
     }
 
     /// 获取版本描述
+    #[allow(dead_code)]
     pub fn description(&self) -> &str {
         match self {
             MinecraftVersion::Legacy => "1.6-1.12 (Legacy)",
@@ -91,6 +92,7 @@ impl MinecraftVersion {
     }
 
     /// 是否使用组件系统
+    #[allow(dead_code)]
     pub fn uses_components(&self) -> bool {
         matches!(
             self,

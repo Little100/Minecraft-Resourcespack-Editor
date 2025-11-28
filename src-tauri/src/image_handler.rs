@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::fs::File;
 
 /// 读取图片并转换为base64
+#[allow(dead_code)]
 pub fn image_to_base64(path: &Path) -> Result<String, String> {
     let img = image::open(path)
         .map_err(|e| format!("Failed to open image: {}", e))?;
@@ -19,6 +20,7 @@ pub fn image_to_base64(path: &Path) -> Result<String, String> {
 }
 
 /// 获取图片尺寸
+#[allow(dead_code)]
 pub fn get_image_dimensions(path: &Path) -> Result<(u32, u32), String> {
     let img = image::open(path)
         .map_err(|e| format!("Failed to open image: {}", e))?;
@@ -27,6 +29,7 @@ pub fn get_image_dimensions(path: &Path) -> Result<(u32, u32), String> {
 }
 
 /// 调整图片大小
+#[allow(dead_code)]
 pub fn resize_image(
     path: &Path,
     output_path: &Path,
@@ -184,6 +187,7 @@ pub async fn create_thumbnail_async(
         .map_err(|e| format!("Channel error: {}", e))?
 }
 
+#[allow(dead_code)]
 pub async fn create_thumbnails_batch(
     paths: Vec<PathBuf>,
     max_size: u32,

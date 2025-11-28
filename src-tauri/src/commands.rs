@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use regex::Regex;
+use rayon::prelude::*;
 
 /// 应用状态
 pub struct AppState {
@@ -1069,6 +1071,7 @@ pub async fn open_logs_folder() -> Result<(), String> {
 }
 
 /// 写入日志到文件
+#[allow(dead_code)]
 pub async fn write_log(level: &str, message: &str) {
     let exe_path = match std::env::current_exe() {
         Ok(path) => path,
@@ -1181,4 +1184,267 @@ async fn read_latest_logs() -> Vec<DebugLog> {
             None
         })
         .collect()
+}
+
+/// 搜索结果
+#[derive(Debug, Serialize)]
+pub struct SearchResult {
+    pub file_path: String,
+    pub match_type: String,
+    pub line_number: Option<usize>,
+    pub line_content: Option<String>,
+    pub match_start: Option<usize>,
+    pub match_end: Option<usize>,
+}
+
+/// 搜索响应
+#[derive(Debug, Serialize)]
+pub struct SearchResponse {
+    pub filename_matches: Vec<SearchResult>,
+    pub content_matches: Vec<SearchResult>,
+    pub total_count: usize,
+}
+
+/// 搜索文件
+#[tauri::command]
+pub async fn search_files(
+    query: String,
+    case_sensitive: bool,
+    use_regex: bool,
+    state: State<'_, AppState>,
+) -> Result<SearchResponse, String> {
+    let pack_path = state.current_pack_path.lock().unwrap();
+    
+    let base_path = match pack_path.as_ref() {
+        Some(path) => path.clone(),
+        None => return Err("No pack loaded".to_string()),
+    };
+    
+    drop(pack_path);
+    
+    // 编译正则表达式或准备搜索模式
+    let regex_pattern = if use_regex {
+        Some(Regex::new(&query).map_err(|e| format!("Invalid regex pattern: {}", e))?)
+    } else {
+        None
+    };
+    
+    // 收集所有文件
+    let files = collect_searchable_files(&base_path)?;
+    
+    // 并行搜索
+    let (filename_matches, content_matches): (Vec<_>, Vec<_>) = files
+        .par_iter()
+        .filter_map(|file_path| {
+            search_in_file(
+                file_path,
+                &base_path,
+                &query,
+                case_sensitive,
+                use_regex,
+                regex_pattern.as_ref(),
+            ).ok()
+        })
+        .flatten()
+        .partition(|result| result.match_type == "filename");
+    
+    // 限制结果数量
+    let filename_matches: Vec<_> = filename_matches.into_iter().take(100).collect();
+    let content_matches: Vec<_> = content_matches.into_iter().take(200).collect();
+    
+    let total_count = filename_matches.len() + content_matches.len();
+    
+    Ok(SearchResponse {
+        filename_matches,
+        content_matches,
+        total_count,
+    })
+}
+
+/// 收集可搜索的文件
+fn collect_searchable_files(base_path: &Path) -> Result<Vec<PathBuf>, String> {
+    use walkdir::WalkDir;
+    
+    let mut files = Vec::new();
+    
+    for entry in WalkDir::new(base_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            // 排除 .history 和 .little100
+            if let Some(name) = e.file_name().to_str() {
+                !matches!(name, ".history" | ".little100")
+            } else {
+                true
+            }
+        })
+    {
+        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        
+        if entry.file_type().is_file() {
+            if let Some(ext) = entry.path().extension() {
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                // 支持的文件类型
+                if matches!(ext_str.as_str(), "json" | "mcmeta" | "txt" | "png") {
+                    files.push(entry.path().to_path_buf());
+                }
+            }
+        }
+    }
+    
+    Ok(files)
+}
+
+/// 在单个文件中搜索
+fn search_in_file(
+    file_path: &Path,
+    base_path: &Path,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    regex_pattern: Option<&Regex>,
+) -> Result<Vec<SearchResult>, String> {
+    let mut results = Vec::new();
+    
+    let relative_path = file_path
+        .strip_prefix(base_path)
+        .unwrap_or(file_path)
+        .to_string_lossy()
+        .replace('\\', "/");
+    
+    let file_name = file_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    
+    // 搜索文件名
+    let filename_match = if use_regex {
+        if let Some(regex) = regex_pattern {
+            regex.is_match(&file_name)
+        } else {
+            false
+        }
+    } else {
+        if case_sensitive {
+            file_name.contains(query)
+        } else {
+            file_name.to_lowercase().contains(&query.to_lowercase())
+        }
+    };
+    
+    if filename_match {
+        let (match_start, match_end) = if use_regex {
+            if let Some(regex) = regex_pattern {
+                if let Some(mat) = regex.find(&file_name) {
+                    (Some(mat.start()), Some(mat.end()))
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            }
+        } else {
+            let search_name = if case_sensitive {
+                file_name.clone()
+            } else {
+                file_name.to_lowercase()
+            };
+            let search_query = if case_sensitive {
+                query.to_string()
+            } else {
+                query.to_lowercase()
+            };
+            
+            if let Some(pos) = search_name.find(&search_query) {
+                (Some(pos), Some(pos + query.len()))
+            } else {
+                (None, None)
+            }
+        };
+        
+        results.push(SearchResult {
+            file_path: relative_path.clone(),
+            match_type: "filename".to_string(),
+            line_number: None,
+            line_content: None,
+            match_start,
+            match_end,
+        });
+    }
+    
+    // 搜索文件内容
+    if let Some(ext) = file_path.extension() {
+        let ext_str = ext.to_string_lossy().to_lowercase();
+        if matches!(ext_str.as_str(), "json" | "mcmeta" | "txt") {
+            // 读取文件内容限制大小为 10MB
+            let metadata = std::fs::metadata(file_path).ok();
+            if let Some(meta) = metadata {
+                if meta.len() > 10 * 1024 * 1024 {
+                    // 文件过大跳过内容搜索
+                    return Ok(results);
+                }
+            }
+            
+            if let Ok(content) = std::fs::read_to_string(file_path) {
+                for (line_num, line) in content.lines().enumerate() {
+                    let line_match = if use_regex {
+                        if let Some(regex) = regex_pattern {
+                            regex.is_match(line)
+                        } else {
+                            false
+                        }
+                    } else {
+                        if case_sensitive {
+                            line.contains(query)
+                        } else {
+                            line.to_lowercase().contains(&query.to_lowercase())
+                        }
+                    };
+                    
+                    if line_match {
+                        let (match_start, match_end) = if use_regex {
+                            if let Some(regex) = regex_pattern {
+                                if let Some(mat) = regex.find(line) {
+                                    (Some(mat.start()), Some(mat.end()))
+                                } else {
+                                    (None, None)
+                                }
+                            } else {
+                                (None, None)
+                            }
+                        } else {
+                            let search_line = if case_sensitive {
+                                line.to_string()
+                            } else {
+                                line.to_lowercase()
+                            };
+                            let search_query = if case_sensitive {
+                                query.to_string()
+                            } else {
+                                query.to_lowercase()
+                            };
+                            
+                            if let Some(pos) = search_line.find(&search_query) {
+                                (Some(pos), Some(pos + query.len()))
+                            } else {
+                                (None, None)
+                            }
+                        };
+                        
+                        results.push(SearchResult {
+                            file_path: relative_path.clone(),
+                            match_type: "content".to_string(),
+                            line_number: Some(line_num + 1),
+                            line_content: Some(line.to_string()),
+                            match_start,
+                            match_end,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(results)
 }
