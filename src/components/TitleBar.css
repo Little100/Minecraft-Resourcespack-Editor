@@ -41,6 +41,28 @@
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pre-release-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+  color: white;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dark"] .pre-release-badge {
+  background: linear-gradient(135deg, #ff8787 0%, #ff6b6b 100%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .titlebar-subtitle {

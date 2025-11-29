@@ -147,7 +147,10 @@ const TitleBar = ({ packSize = 0, historySize = 0, showStats = false, debugMode 
       <div className="titlebar-left" data-tauri-drag-region>
         <img src={logoImg} alt="Logo" className="titlebar-icon" />
         <div className="titlebar-text">
-          <span className="titlebar-title">Minecraft 材质包编辑器</span>
+          <span className="titlebar-title">
+            Minecraft 材质包编辑器
+            <span className="pre-release-badge">pre-release</span>
+          </span>
           <span className="titlebar-subtitle">Powered By Little_100</span>
         </div>
       </div>
