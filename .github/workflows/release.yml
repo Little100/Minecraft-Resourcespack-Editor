@@ -68,7 +68,7 @@ jobs:
 
       - name: Create Gitee Release
         run: |
-          node .github/scripts/sync-gitee-release.js
+          node .github/scripts/sync-gitee-release.cjs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -78,7 +78,7 @@ jobs:
 
       - name: Generate updater JSON for Gitee
         run: |
-          node .github/scripts/generate-updater-gitee.js
+          node .github/scripts/generate-updater-gitee.cjs
         env:
           GITEE_OWNER: ${{ secrets.GITEE_OWNER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}
