@@ -22,6 +22,7 @@ import { VERSION_DESCRIPTIONS, RESOURCE_TYPE_NAMES } from "./types/pack";
 import grassBlockImg from "./assets/grass-block.png";
 import avatarImg from "./assets/ava.jpg";
 import { open } from '@tauri-apps/plugin-shell';
+import { checkForUpdates } from "./utils/updater";
 
 type Theme = "light" | "dark" | "system";
 type WebService = "off" | "lan" | "all";
@@ -334,6 +335,20 @@ function App() {
     checkStatus();
     const interval = setInterval(checkStatus, 5000);
     return () => clearInterval(interval);
+  }, []);
+
+  // 启动时检查更新
+  useEffect(() => {
+    const checkUpdate = async () => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        await checkForUpdates();
+      } catch (error) {
+        console.error('检查更新失败:', error);
+      }
+    };
+
+    checkUpdate();
   }, []);
 
   if (packInfo) {
