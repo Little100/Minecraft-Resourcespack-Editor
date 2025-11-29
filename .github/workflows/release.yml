@@ -90,7 +90,7 @@ jobs:
 
       - name: Generate updater JSON for Gitee
         run: |
-          node .github/scripts/generate-updater-gitee.cjs
+          node .github/scripts/generate-updater-gitee.js
         env:
           GITEE_OWNER: ${{ secrets.GITEE_OWNER }}
           GITEE_REPO: ${{ secrets.GITEE_REPO }}

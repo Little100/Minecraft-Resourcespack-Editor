@@ -27,6 +27,10 @@
     "fs:allow-exists",
     "fs:allow-create",
     "fs:allow-remove",
-    "fs:default"
+    "fs:default",
+    "updater:default",
+    "updater:allow-check",
+    "process:default",
+    "process:allow-restart"
   ]
 }
