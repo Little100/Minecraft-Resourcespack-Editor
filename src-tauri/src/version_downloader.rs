@@ -265,6 +265,20 @@ pub fn extract_assets_from_jar(jar_path: &Path, output_dir: &Path) -> Result<(),
     Ok(())
 }
 
+/// 检测语言文件格式
+fn detect_language_file_extension(output_dir: &Path) -> String {
+    let lang_dir = output_dir.join("assets").join("minecraft").join("lang");
+    
+    if lang_dir.join("en_US.json").exists() || lang_dir.join("en_us.json").exists() {
+        return "json".to_string();
+    }
+    
+    if lang_dir.join("en_US.lang").exists() || lang_dir.join("en_us.lang").exists() {
+        return "lang".to_string();
+    }
+    "json".to_string()
+}
+
 /// 下载语言文件
 async fn download_language_file(
     version_url: &str,
@@ -308,42 +322,49 @@ async fn download_language_file(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .ok_or("Failed to parse objects from asset index")?;
     
+    // 检测语言文件扩展名
+    let lang_extension = detect_language_file_extension(output_dir);
+    println!("Detected language file extension: .{}", lang_extension);
+    
     // 查找中文语言文件
-    let lang_key = "minecraft/lang/zh_cn.json";
-    let lang_asset = match assets.get(lang_key) {
-        Some(asset) => asset,
-        None => {
-            // 如果当前版本没有中文文件使用最新 release版本
-            println!("Chinese language file not found for version {}, trying latest release", version_id);
-            
-            // 更新进度信息
-            if let (Some(tid), Some(mgr)) = (&task_id, &manager) {
-                mgr.update_progress(tid, DownloadProgress {
-                    task_id: tid.clone(),
-                    status: DownloadStatus::Downloading,
-                    current: 3,
-                    total: 4,
-                    current_file: Some(format!("版本 {} 无中文文件，使用最新版本...", version_id)),
-                    speed: 0.0,
-                    eta: None,
-                    error: None,
-                }).await;
-            }
-            
-            // 获取版本清单
-            let manifest = fetch_version_manifest().await?;
-            let latest_version = manifest.versions
-                .iter()
-                .find(|v| v.id == manifest.latest.release)
-                .ok_or("Latest release version not found")?;
-            
-            if latest_version.id == version_id {
-                return Err(format!("Chinese language file not found for version {} and latest release", version_id));
-            }
-            
-            return Box::pin(download_language_file(&latest_version.url, &latest_version.id, output_dir, task_id, manager)).await
-                .map(|(success, _, _)| (success, true, latest_version.id.clone()));
+    let lang_key_json = "minecraft/lang/zh_cn.json";
+    let lang_key_lang = "minecraft/lang/zh_cn.lang";
+    
+    let (lang_asset, actual_key) = if let Some(asset) = assets.get(lang_key_json) {
+        (asset, lang_key_json)
+    } else if let Some(asset) = assets.get(lang_key_lang) {
+        (asset, lang_key_lang)
+    } else {
+        // 如果当前版本没有中文文件使用最新 release版本
+        println!("Chinese language file not found for version {}, trying latest release", version_id);
+        
+        // 更新进度信息
+        if let (Some(tid), Some(mgr)) = (&task_id, &manager) {
+            mgr.update_progress(tid, DownloadProgress {
+                task_id: tid.clone(),
+                status: DownloadStatus::Downloading,
+                current: 3,
+                total: 4,
+                current_file: Some(format!("版本 {} 无中文文件，使用最新版本...", version_id)),
+                speed: 0.0,
+                eta: None,
+                error: None,
+            }).await;
         }
+        
+        // 获取版本清单
+        let manifest = fetch_version_manifest().await?;
+        let latest_version = manifest.versions
+            .iter()
+            .find(|v| v.id == manifest.latest.release)
+            .ok_or("Latest release version not found")?;
+        
+        if latest_version.id == version_id {
+            return Err(format!("Chinese language file not found for version {} and latest release", version_id));
+        }
+        
+        return Box::pin(download_language_file(&latest_version.url, &latest_version.id, output_dir, task_id, manager)).await
+            .map(|(success, _, _)| (success, true, latest_version.id.clone()));
     };
     
     // 构建下载URL: https://resources.download.minecraft.net/{前2位}/{完整hash}
@@ -353,6 +374,8 @@ async fn download_language_file(
         &hash[0..2],
         hash
     );
+    
+    println!("Downloading Chinese language file from: {}", actual_key);
     
     // 下载语言文件
     let response = reqwest::get(&download_url)
@@ -373,16 +396,17 @@ async fn download_language_file(
     std::fs::write(&map_json_path, &content)
         .map_err(|e| format!("Failed to write map.json: {}", e))?;
     
-    // 保存到 assets/minecraft/lang/zh_cn.lang
+    // 根据检测到的扩展名保存到 assets/minecraft/lang/zh_cn.？
     let lang_dir = output_dir.join("assets").join("minecraft").join("lang");
     std::fs::create_dir_all(&lang_dir)
         .map_err(|e| format!("Failed to create lang directory: {}", e))?;
     
-    let zh_cn_path = lang_dir.join("zh_cn.lang");
+    let zh_cn_filename = format!("zh_cn.{}", lang_extension);
+    let zh_cn_path = lang_dir.join(&zh_cn_filename);
     std::fs::write(&zh_cn_path, &content)
-        .map_err(|e| format!("Failed to write zh_cn.lang: {}", e))?;
+        .map_err(|e| format!("Failed to write {}: {}", zh_cn_filename, e))?;
     
-    println!("Successfully downloaded and saved language file for version {}", version_id);
+    println!("Successfully downloaded and saved language file as {} for version {}", zh_cn_filename, version_id);
     Ok((true, false, version_id.to_string()))
 }
 

@@ -9,12 +9,16 @@ const GITEE_REPO = process.env.GITEE_REPO;
 const TAG_NAME = process.env.TAG_NAME;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 
+// GitHub 仓库信息（固定值）
+const GITHUB_OWNER = 'Little100';
+const GITHUB_REPO = 'Minecraft-Resourcespack-Editor';
+
 // 从 GitHub 获取 Release 信息
 async function getGitHubRelease() {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'api.github.com',
-      path: `/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${TAG_NAME}`,
+      path: `/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tags/${TAG_NAME}`,
       method: 'GET',
       headers: {
         'User-Agent': 'Node.js',
