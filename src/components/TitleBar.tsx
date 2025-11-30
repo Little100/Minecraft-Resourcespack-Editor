@@ -7,6 +7,8 @@ import './TitleBar.css';
 import logoImg from '../assets/logo.png';
 import creditsContent from '../../credits.md?raw';
 import { manualCheckUpdate } from '../utils/updater';
+import Little100Avatar from '../assets/avatar/Little_100.png';
+import LivedInCornerAvatar from '../assets/avatar/LivedInCorner.png';
 
 interface TitleBarProps {
   packSize?: number;      // 材质包大小
@@ -59,6 +61,12 @@ const TitleBar = ({ packSize = 0, historySize = 0, showStats = false, debugMode 
     </svg>
   );
 
+  // 头像映射表
+  const avatarMap: Record<string, string> = {
+    'src/assets/avatar/Little_100.png': Little100Avatar,
+    'src/assets/avatar/LivedInCorner.png': LivedInCornerAvatar,
+  };
+
   // 解析credits.md内容
   const parseCredits = () => {
     const lines = creditsContent.split('\n');
@@ -86,9 +94,9 @@ const TitleBar = ({ packSize = 0, historySize = 0, showStats = false, debugMode 
           currentContributor.qq = qq;
         }
       } else if (trimmedLine.startsWith('- avatar:')) {
-        const avatar = trimmedLine.split('avatar:')[1]?.trim();
-        if (avatar && currentContributor) {
-          currentContributor.avatar = avatar;
+        const avatarPath = trimmedLine.split('avatar:')[1]?.trim();
+        if (avatarPath && currentContributor) {
+          currentContributor.avatar = avatarMap[avatarPath] || avatarPath;
         }
       }
     });

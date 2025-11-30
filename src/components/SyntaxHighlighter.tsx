@@ -38,6 +38,11 @@ const tokenizeJSON = (code: string): Token[] => {
       continue;
     }
 
+    if (char === '\r') {
+      i++;
+      continue;
+    }
+
     // 空白字符
     if (/\s/.test(char)) {
       addToken('text', char);
@@ -51,9 +56,15 @@ const tokenizeJSON = (code: string): Token[] => {
       i++;
       let escaped = false;
       let closed = false;
+      let strStartColumn = column;
 
       while (i < code.length) {
         const c = code[i];
+
+        if (c === '\n') {
+          break;
+        }
+
         str += c;
 
         if (escaped) {
@@ -64,8 +75,6 @@ const tokenizeJSON = (code: string): Token[] => {
           closed = true;
           i++;
           break;
-        } else if (c === '\n') {
-          break;
         }
         i++;
       }
@@ -74,7 +83,13 @@ const tokenizeJSON = (code: string): Token[] => {
       while (j < code.length && /\s/.test(code[j])) j++;
       const isKey = code[j] === ':';
 
-      addToken(closed ? (isKey ? 'key' : 'string') : 'error', str);
+      tokens.push({
+        type: closed ? (isKey ? 'key' : 'string') : 'error',
+        value: str,
+        line,
+        column: strStartColumn
+      });
+      column += str.length;
       continue;
     }
 

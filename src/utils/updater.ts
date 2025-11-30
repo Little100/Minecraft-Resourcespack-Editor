@@ -8,7 +8,7 @@ const REPO_NAME = 'minecraft-resourcespack-editor';
 const CHANGELOG_RAW_URL = 'https://gitee.com/little_100/minecraft-resourcespack-editor/raw/main/CHANGELOG.md';
 
 // 当前版本
-const CURRENT_VERSION = '0.1.3';
+const CURRENT_VERSION = '0.1.4';
 
 interface GiteeRelease {
   id: number;
@@ -79,7 +79,7 @@ async function fetchChangelog(): Promise<string | null> {
   }
 }
 
-function showChangelogModal(changelog: string) {
+function showChangelogModal(changelog: string, latestVersion?: string) {
   const overlay = document.createElement('div');
   overlay.style.cssText = `
     position: fixed;
@@ -135,6 +135,13 @@ function showChangelogModal(changelog: string) {
     align-items: center;
   `;
   
+  const titleContainer = document.createElement('div');
+  titleContainer.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  `;
+  
   const title = document.createElement('h2');
   title.textContent = '更新日志';
   title.style.cssText = `
@@ -142,6 +149,27 @@ function showChangelogModal(changelog: string) {
     font-size: 20px;
     font-weight: 600;
   `;
+  
+  const versionInfo = document.createElement('div');
+  const currentVersion = `v${CURRENT_VERSION}`;
+  versionInfo.style.cssText = `
+    font-size: 13px;
+    color: var(--text-secondary, #666666);
+    font-family: 'Consolas', 'Monaco', monospace;
+  `;
+  
+  if (latestVersion && compareVersions(latestVersion, currentVersion) > 0) {
+    versionInfo.innerHTML = `
+      当前版本: <span style="color: var(--text-primary, #000000);">${currentVersion}</span>
+      <span style="margin: 0 8px;">→</span>
+      最新版本: <span style="color: #22c55e; font-weight: 600;">${latestVersion}</span>
+    `;
+  } else {
+    versionInfo.innerHTML = `当前版本: <span style="color: var(--text-primary, #000000);">${currentVersion}</span>`;
+  }
+  
+  titleContainer.appendChild(title);
+  titleContainer.appendChild(versionInfo);
 
   const closeBtn = document.createElement('button');
   closeBtn.innerHTML = 'x';
@@ -177,7 +205,7 @@ function showChangelogModal(changelog: string) {
     }, 300);
   };
 
-  header.appendChild(title);
+  header.appendChild(titleContainer);
   header.appendChild(closeBtn);
 
   // 创建内容
@@ -402,7 +430,7 @@ export async function manualCheckUpdate() {
       } else {
         const changelog = await fetchChangelog();
         if (changelog) {
-          showChangelogModal(changelog);
+          showChangelogModal(changelog, latestVersion);
         } else {
           alert('无法获取更新日志');
         }
@@ -410,7 +438,7 @@ export async function manualCheckUpdate() {
     } else {
       const changelog = await fetchChangelog();
       if (changelog) {
-        showChangelogModal(changelog);
+        showChangelogModal(changelog, latestVersion);
       } else {
         alert('无法获取更新日志');
       }

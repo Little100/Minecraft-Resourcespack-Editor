@@ -3,7 +3,10 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import "./PackMetaEditor.css";
 import SyntaxHighlighter from "./SyntaxHighlighter";
+import PackMetaVisualEditor from "./PackMetaVisualEditor";
 import { writeFileContent } from "../utils/tauri-api";
+import { getCompletions, validateJson } from "../utils/json-schema-helper";
+import { getVersionsByPackFormat } from "../utils/version-map";
 
 interface PackMetaEditorProps {
   content: string;
@@ -130,10 +133,115 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
   const [scrollTop, setScrollTop] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [completions, setCompletions] = useState<Array<{label: string; insertText: string; detail?: string; kind: string}>>([]);
+  const [completionIndex, setCompletionIndex] = useState(0);
+  const [showCompletions, setShowCompletions] = useState(false);
+  const [completionPos, setCompletionPos] = useState({ x: 0, y: 0 });
+  const [schemaErrors, setSchemaErrors] = useState<string[]>([]);
+  const [showVisualEditor, setShowVisualEditor] = useState(false);
+  const [packFormatVersions, setPackFormatVersions] = useState<Record<number, string>>({});
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const completionMenuRef = useRef<HTMLDivElement>(null);
   const originalContent = useRef(content);
+
+  // 加载版本信息
+  useEffect(() => {
+    const loadVersions = async () => {
+      if (!parsedData?.pack) {
+        console.log('[版本映射] 没有 pack 数据，跳过加载');
+        return;
+      }
+      
+      const pack = parsedData.pack;
+      const formats: number[] = [];
+      
+      // 优先使用
+      if (pack.pack_format) {
+        formats.push(pack.pack_format);
+        console.log('[版本映射] 检测到 pack_format:', pack.pack_format);
+      }
+      
+      if (pack.min_format) {
+        const minFormat = Array.isArray(pack.min_format) ? pack.min_format[0] : pack.min_format;
+        if (!formats.includes(minFormat)) {
+          formats.push(minFormat);
+        }
+        console.log('[版本映射] 检测到 min_format:', minFormat);
+      }
+      
+      if (pack.max_format) {
+        const maxFormat = Array.isArray(pack.max_format) ? pack.max_format[0] : pack.max_format;
+        if (!formats.includes(maxFormat)) {
+          formats.push(maxFormat);
+        }
+        console.log('[版本映射] 检测到 max_format:', maxFormat);
+      }
+      
+      if (formats.length === 0) {
+        console.log('[版本映射] 没有找到任何格式版本号');
+        return;
+      }
+
+      console.log('[版本映射] 需要加载的格式:', formats);
+      
+      // 加载所有需要的格式
+      for (const format of formats) {
+        if (packFormatVersions[format]) {
+          console.log('[版本映射] 格式', format, '已缓存:', packFormatVersions[format]);
+          continue;
+        }
+
+        console.log('[版本映射] 开始加载格式', format, '的版本信息...');
+        try {
+          const versions = await getVersionsByPackFormat(format);
+          console.log('[版本映射] 格式', format, '获取到的版本列表:', versions);
+          
+          if (versions && versions.length > 0) {
+            // 区分正式版和预览版
+            const releasePattern = /^\d+\.\d+(\.\d+)?$/;
+            const releases = versions.filter(v => releasePattern.test(v));
+            const allVersions = versions;
+            
+            const firstRelease = releases.length > 0 ? releases[releases.length - 1] : null;
+            const lastRelease = releases.length > 0 ? releases[0] : null;
+            const firstAll = allVersions[allVersions.length - 1];
+            const lastAll = allVersions[0];
+            
+            let releaseRange = '';
+            let fullRange = '';
+            
+            if (firstRelease && lastRelease) {
+              releaseRange = firstRelease === lastRelease ? firstRelease : `${firstRelease} - ${lastRelease}`;
+            }
+            
+            fullRange = firstAll === lastAll ? firstAll : `${firstAll} - ${lastAll}`;
+            
+            console.log('[版本映射] 格式', format, '正式版范围:', releaseRange, '完整范围:', fullRange);
+            setPackFormatVersions(prev => ({
+              ...prev,
+              [format]: JSON.stringify({ release: releaseRange, full: fullRange })
+            }));
+          } else {
+            console.log('[版本映射] 格式', format, '版本列表为空');
+            setPackFormatVersions(prev => ({
+              ...prev,
+              [format]: JSON.stringify({ release: '', full: '未知版本' })
+            }));
+          }
+        } catch (error) {
+          console.error('[版本映射] 格式', format, '加载失败:', error);
+          setPackFormatVersions(prev => ({
+            ...prev,
+            [format]: JSON.stringify({ release: '', full: '加载失败' })
+          }));
+        }
+      }
+    };
+    
+    loadVersions();
+  }, [parsedData, packFormatVersions]);
 
   useEffect(() => {
     setText(content);
@@ -152,6 +260,9 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     const handleClickOutside = (event: MouseEvent) => {
       if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
         setContextMenu(null);
+      }
+      if (completionMenuRef.current && !completionMenuRef.current.contains(event.target as Node)) {
+        setShowCompletions(false);
       }
     };
 
@@ -183,9 +294,13 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       const parsed = JSON.parse(jsonText);
       setParsedData(parsed);
       setParseError(null);
+      
+      const validation = validateJson(parsed, 'pack.mcmeta', jsonText);
+      setSchemaErrors(validation.errors);
     } catch (err) {
       setParseError(err instanceof Error ? err.message : '解析错误');
       setParsedData(null);
+      setSchemaErrors([]);
     }
   };
 
@@ -209,12 +324,179 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     if (onChange) {
       onChange(newText);
     }
+    
+    // 自动触发补全
+    const textarea = e.currentTarget;
+    const cursorPos = textarea.selectionStart;
+    const beforeCursor = newText.substring(0, cursorPos);
+    
+    console.log('[补全] 输入变化:', {
+      lastChar: newText[cursorPos - 1],
+      beforeCursor: beforeCursor.slice(-30),
+      cursorPos
+    });
+    
+    const shouldTrigger = /[\{,]\s*[a-zA-Z_][a-zA-Z0-9_]*$/.test(beforeCursor);
+    
+    console.log('[补全] 是否触发:', shouldTrigger);
+    
+    if (shouldTrigger) {
+      console.log('[补全] 立即触发补全');
+      requestAnimationFrame(() => {
+        triggerCompletion(newText, cursorPos);
+      });
+    } else {
+      setShowCompletions(false);
+    }
   };
 
   const handleScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;
     setScrollTop(target.scrollTop);
     setScrollLeft(target.scrollLeft);
+  };
+
+  // 触发补全
+  const triggerCompletion = (currentText?: string, currentCursorPos?: number) => {
+    console.log('[补全] triggerCompletion 被调用');
+    
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      console.log('[补全] textarea 不存在，退出');
+      return;
+    }
+
+    const actualText = currentText !== undefined ? currentText : text;
+    const cursorPos = currentCursorPos !== undefined ? currentCursorPos : textarea.selectionStart;
+    
+    console.log('[补全] 使用文本:', actualText);
+    console.log('[补全] 光标位置:', cursorPos);
+    console.log('[补全] 调用 getCompletions');
+    
+    const items = getCompletions(actualText, cursorPos, 'pack.mcmeta');
+    console.log('[补全] getCompletions 返回:', items);
+    
+    if (items.length === 0) {
+      console.log('[补全] 没有补全项');
+      setShowCompletions(false);
+      return;
+    }
+
+    const beforeCursor = actualText.substring(0, cursorPos);
+    const match = beforeCursor.match(/[a-zA-Z_][a-zA-Z0-9_]*$/);
+    const currentInput = match ? match[0] : '';
+    
+    console.log('[补全] 当前输入:', currentInput);
+    
+    let filteredItems = items;
+    if (currentInput) {
+      // 只保留以当前输入开头的补全项
+      filteredItems = items.filter(item =>
+        item.label.toLowerCase().startsWith(currentInput.toLowerCase())
+      );
+      
+      console.log('[补全] startsWith 过滤后:', filteredItems.length);
+    }
+    
+    // 没有匹配项隐藏
+    if (filteredItems.length === 0) {
+      console.log('[补全] 没有匹配项，隐藏补全');
+      setShowCompletions(false);
+      return;
+    }
+
+    console.log('[补全] 最终补全项数量:', filteredItems.length);
+    
+    setCompletions(filteredItems);
+    setCompletionIndex(0);
+    
+    // 计算补全位置
+    const textBeforeCursor = actualText.substring(0, cursorPos);
+    const lines = textBeforeCursor.split('\n');
+    const currentLine = lines.length;
+    const currentCol = lines[lines.length - 1].length;
+    
+    const lineHeight = fontSize * 1.5;
+    const charWidth = fontSize * 0.6;
+    
+    const textareaRect = textarea.getBoundingClientRect();
+    
+    const cursorX = currentCol * charWidth;
+    const cursorY = (currentLine - 1) * lineHeight;
+    
+    const padding = 16;
+    let x = textareaRect.left + padding + cursorX - scrollLeft;
+    let y = textareaRect.top + padding + cursorY + lineHeight - scrollTop;
+    
+    const menuWidth = 300;
+    const menuHeight = 400;
+    
+    if (x + menuWidth > window.innerWidth) {
+      x = window.innerWidth - menuWidth - 10;
+    }
+    
+    if (y + menuHeight > window.innerHeight) {
+      y = textareaRect.top + padding + cursorY - scrollTop - menuHeight;
+    }
+    
+    console.log('[补全] 菜单位置:', {
+      x,
+      y,
+      textareaRect,
+      cursorX,
+      cursorY,
+      scrollTop,
+      scrollLeft
+    });
+    
+    setCompletionPos({ x: Math.max(0, x), y: Math.max(0, y) });
+    setShowCompletions(true);
+    console.log('[补全] 设置 showCompletions = true');
+  };
+
+  // 插入补全项
+  const insertCompletion = (item: typeof completions[0]) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const cursorPos = textarea.selectionStart;
+    const beforeCursor = text.substring(0, cursorPos);
+    const afterCursor = text.substring(cursorPos);
+    
+    // 查找当前正在输入的标识符
+    const match = beforeCursor.match(/[a-zA-Z_][a-zA-Z0-9_]*$/);
+    let replaceStart = cursorPos;
+    
+    if (match) {
+      replaceStart = cursorPos - match[0].length;
+    }
+    
+    const newText = text.substring(0, replaceStart) + item.insertText + afterCursor;
+    let newCursorPos = replaceStart + item.insertText.length;
+    
+    if (item.insertText.match(/"[^"]*":\s*""/)) {
+      const colonPos = item.insertText.lastIndexOf('""');
+      newCursorPos = replaceStart + colonPos + 1;
+    } else if (item.insertText.includes('\n')) {
+      const lines = item.insertText.split('\n');
+      const offset = lines[0].length + 1 + (lines[1]?.match(/^\s*/)?.[0].length || 0);
+      newCursorPos = replaceStart + offset;
+    }
+    
+    setText(newText);
+    tryParseJSON(newText);
+    setIsDirty(newText !== originalContent.current);
+    addToHistory(newText);
+    if (onChange) {
+      onChange(newText);
+    }
+    
+    setShowCompletions(false);
+    
+    setTimeout(() => {
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = newCursorPos;
+    }, 0);
   };
 
   const saveHistoryToBackend = async () => {
@@ -339,6 +621,37 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const textarea = e.currentTarget;
     const { selectionStart, selectionEnd, value } = textarea;
+
+    // 处理补全菜单
+    if (showCompletions) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCompletionIndex((prev) => (prev + 1) % completions.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCompletionIndex((prev) => (prev - 1 + completions.length) % completions.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        insertCompletion(completions[completionIndex]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowCompletions(false);
+        return;
+      }
+    }
+
+    // Ctrl+Space 触发补全
+    if (e.ctrlKey && e.key === ' ') {
+      e.preventDefault();
+      triggerCompletion(text, textarea.selectionStart);
+      return;
+    }
 
     // Ctrl+S 保存
     if (e.ctrlKey && e.key === 's') {
@@ -571,28 +884,259 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       return <div className="preview-empty">暂无预览</div>;
     }
 
+    const renderDescription = (desc: any) => {
+      if (typeof desc === 'string') {
+        return <div className="minecraft-text">{parseMinecraftText(desc)}</div>;
+      }
+      return <pre className="json-value">{JSON.stringify(desc, null, 2)}</pre>;
+    };
+
+    // 获取资源包名称
+    const getPackName = () => {
+      const pathParts = filePath.split('/');
+      // 找到资源包根目录名
+      const packIndex = pathParts.findIndex(part => part === 'pack.mcmeta');
+      if (packIndex > 0) {
+        return pathParts[packIndex - 1];
+      }
+      return '资源包';
+    };
+
+    // 获取版本范围
+    const getVersionRange = (formatValue: number | number[] | undefined): { release: string; full: string } => {
+      if (!formatValue) return { release: '', full: '' };
+      
+      const format = Array.isArray(formatValue) ? formatValue[0] : formatValue;
+      const cached = packFormatVersions[format];
+      
+      if (!cached) {
+        return { release: '', full: '加载中...' };
+      }
+      
+      try {
+        return JSON.parse(cached);
+      } catch {
+        // 兼容旧格式
+        return { release: cached, full: cached };
+      }
+    };
+
     return (
       <div className="preview-content">
+        {/* Pack Info */}
         <div className="preview-section">
-          <h4>材质包信息</h4>
-          {parsedData.pack && (
+          <h4>基础信息 ({getPackName()})</h4>
+          {parsedData.pack ? (
             <div className="info-grid">
-              <div className="info-item">
-                <span className="info-label">格式版本:</span>
-                <span className="info-value">{parsedData.pack.pack_format}</span>
-              </div>
+              {parsedData.pack.pack_format && (
+                <div className="info-item">
+                  <span className="info-label">格式版本 (pack_format):</span>
+                  <div className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{parsedData.pack.pack_format}</span>
+                    {(() => {
+                      const versionInfo = getVersionRange(parsedData.pack.pack_format);
+                      return (
+                        <>
+                          {versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(34, 197, 94, 0.15)',
+                              color: '#22c55e',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.release}
+                            </span>
+                          )}
+                          {versionInfo.full && versionInfo.full !== versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(59, 130, 246, 0.15)',
+                              color: '#3b82f6',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.full}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+              
+              {parsedData.pack.supported_formats && (
+                <div className="info-item">
+                  <span className="info-label">支持格式:</span>
+                  <span className="info-value">
+                    {typeof parsedData.pack.supported_formats === 'object' && !Array.isArray(parsedData.pack.supported_formats)
+                      ? `${parsedData.pack.supported_formats.min_inclusive} - ${parsedData.pack.supported_formats.max_inclusive}`
+                      : Array.isArray(parsedData.pack.supported_formats)
+                        ? parsedData.pack.supported_formats.join(', ')
+                        : JSON.stringify(parsedData.pack.supported_formats)}
+                  </span>
+                </div>
+              )}
+
+              {parsedData.pack.min_format && (
+                <div className="info-item">
+                  <span className="info-label">最小格式 (min_format):</span>
+                  <div className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{JSON.stringify(parsedData.pack.min_format)}</span>
+                    {(() => {
+                      const versionInfo = getVersionRange(parsedData.pack.min_format);
+                      return (
+                        <>
+                          {versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(34, 197, 94, 0.15)',
+                              color: '#22c55e',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.release}
+                            </span>
+                          )}
+                          {versionInfo.full && versionInfo.full !== versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(59, 130, 246, 0.15)',
+                              color: '#3b82f6',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.full}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {parsedData.pack.max_format && (
+                <div className="info-item">
+                  <span className="info-label">最大格式 (max_format):</span>
+                  <div className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '14px' }}>{JSON.stringify(parsedData.pack.max_format)}</span>
+                    {(() => {
+                      const versionInfo = getVersionRange(parsedData.pack.max_format);
+                      return (
+                        <>
+                          {versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(34, 197, 94, 0.15)',
+                              color: '#22c55e',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.release}
+                            </span>
+                          )}
+                          {versionInfo.full && versionInfo.full !== versionInfo.release && (
+                            <span style={{
+                              padding: '2px 8px',
+                              background: 'rgba(59, 130, 246, 0.15)',
+                              color: '#3b82f6',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}>
+                              {versionInfo.full}
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
               <div className="info-item">
                 <span className="info-label">描述:</span>
-                <div className="info-value minecraft-text">
-                  {parseMinecraftText(parsedData.pack.description)}
+                <div className="info-value-wrapper">
+                  {renderDescription(parsedData.pack.description)}
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="empty-section">未定义 pack 字段</div>
           )}
         </div>
+
+        {/* Language */}
+        {parsedData.language && Object.keys(parsedData.language).length > 0 && (
+          <div className="preview-section">
+            <h4>语言 (Language)</h4>
+            <div className="language-grid">
+              {Object.entries(parsedData.language).map(([code, lang]: [string, any]) => (
+                <div key={code} className="language-card">
+                  <div className="lang-header">
+                    <span className="lang-code">{code}</span>
+                    {lang.bidirectional && <span className="lang-badge">RTL</span>}
+                  </div>
+                  <div className="lang-name">{lang.name}</div>
+                  <div className="lang-region">{lang.region}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Filter */}
+        {parsedData.filter && parsedData.filter.block && parsedData.filter.block.length > 0 && (
+          <div className="preview-section">
+            <h4>过滤器 (Filter)</h4>
+            <div className="filter-list">
+              {parsedData.filter.block.map((item: any, index: number) => (
+                <div key={index} className="filter-item">
+                  <span className="filter-namespace">{item.namespace || '*'}</span>
+                  <span className="filter-separator">/</span>
+                  <span className="filter-path">{item.path || '*'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Overlays */}
+        {parsedData.overlays && parsedData.overlays.entries && parsedData.overlays.entries.length > 0 && (
+          <div className="preview-section">
+            <h4>覆盖层 (Overlays)</h4>
+            <div className="overlay-list">
+              {parsedData.overlays.entries.map((entry: any, index: number) => (
+                <div key={index} className="overlay-item">
+                  <div className="overlay-formats">
+                    <span className="label">格式:</span>
+                    <span className="value">
+                      {entry.formats
+                        ? (typeof entry.formats === 'object' && !Array.isArray(entry.formats)
+                            ? `${entry.formats.min_inclusive}-${entry.formats.max_inclusive}`
+                            : Array.isArray(entry.formats) ? entry.formats.join(', ') : entry.formats)
+                        : (entry.min_format ? `>= ${JSON.stringify(entry.min_format)}` : 'Unknown')}
+                    </span>
+                  </div>
+                  <div className="overlay-dir">
+                    <span className="label">目录:</span>
+                    <code className="value">{entry.directory}</code>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         
         <div className="preview-section">
-          <h4>完整数据</h4>
+          <h4>完整数据 (JSON)</h4>
           <pre className="json-preview">{JSON.stringify(parsedData, null, 2)}</pre>
         </div>
       </div>
@@ -681,6 +1225,16 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             </svg>
           </button>
           <button
+            className="editor-btn"
+            onClick={() => setShowVisualEditor(true)}
+            title="可视化编辑"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 20h9"></path>
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+            </svg>
+          </button>
+          <button
             className="editor-btn save-btn"
             onClick={handleSave}
             disabled={!isDirty}
@@ -700,7 +1254,11 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
           <div className="editor-container" ref={editorContainerRef}>
             <div className="line-numbers" style={{
               fontSize: `${fontSize}px`,
-              lineHeight: '1.5'
+              lineHeight: '1.5',
+              transform: `translateY(-${scrollTop}px)`,
+              willChange: 'transform',
+              height: `${lineCount * fontSize * 1.5 + 32}px`,
+              minHeight: '100%'
             }}>
               {lineNumbers.map((num) => (
                 <div key={num} className="line-number" style={{
@@ -830,6 +1388,80 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         </div>,
         document.body
       )}
+      {/* 可视化编辑器对话框 */}
+      {showVisualEditor && createPortal(
+        <>
+          <div className="modal-overlay" onClick={() => setShowVisualEditor(false)} />
+          <div className="visual-editor-dialog">
+            <div className="dialog-header">
+              <h3>可视化编辑 pack.mcmeta</h3>
+              <button className="dialog-close" onClick={() => setShowVisualEditor(false)}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <PackMetaVisualEditor
+              initialData={parsedData}
+              onApply={(newData) => {
+                const formatted = JSON.stringify(newData, null, 2);
+                setText(formatted);
+                tryParseJSON(formatted);
+                setIsDirty(formatted !== originalContent.current);
+                addToHistory(formatted);
+                if (onChange) {
+                  onChange(formatted);
+                }
+                setShowVisualEditor(false);
+              }}
+              onCancel={() => setShowVisualEditor(false)}
+            />
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* 补全菜单 */}
+      {showCompletions && createPortal(
+        <div
+          ref={completionMenuRef}
+          className="completion-menu"
+          style={{
+            position: 'fixed',
+            left: `${completionPos.x}px`,
+            top: `${completionPos.y}px`,
+            zIndex: 10000
+          }}
+        >
+          <div className="completion-header">
+            <span>建议</span>
+            <span className="completion-hint">↑↓ 导航 · Enter 选择 · Esc 关闭</span>
+          </div>
+          <div className="completion-list">
+            {completions.map((item, index) => (
+              <div
+                key={index}
+                className={`completion-item ${index === completionIndex ? 'selected' : ''}`}
+                onClick={() => insertCompletion(item)}
+                onMouseEnter={() => setCompletionIndex(index)}
+              >
+                <div className="completion-main">
+                  <span className={`completion-icon ${item.kind}`}>
+                    {item.kind === 'property' ? 'P' : item.kind === 'value' ? 'V' : 'S'}
+                  </span>
+                  <span className="completion-label">{item.label}</span>
+                </div>
+                {item.detail && (
+                  <div className="completion-detail">{item.detail}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* 历史记录列表对话框 */}
       {showHistoryList && (
         <>

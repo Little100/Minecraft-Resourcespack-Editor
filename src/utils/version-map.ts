@@ -69,6 +69,39 @@ export async function getAllPackFormats(): Promise<Array<[number, string]>> {
   return result;
 }
 
+export async function getAllPackFormatsWithReleases(): Promise<Array<[number, string]>> {
+  const versionMap = await loadVersionMap();
+  
+  const result: Array<[number, string]> = [];
+  
+  for (const [packFormatStr, versions] of Object.entries(versionMap.resource_pack)) {
+    const packFormat = parseInt(packFormatStr, 10);
+    
+    // 只获取正式版
+    const releases = versions.filter(v => isReleaseVersion(v));
+    
+    if (releases.length === 0) {
+      if (versions.length === 1) {
+        result.push([packFormat, versions[0]]);
+      } else if (versions.length > 1) {
+        const newestVersion = versions[0];
+        const oldestVersion = versions[versions.length - 1];
+        result.push([packFormat, `${oldestVersion} – ${newestVersion}`]);
+      }
+    } else if (releases.length === 1) {
+      result.push([packFormat, releases[0]]);
+    } else {
+      const newestRelease = releases[0];
+      const oldestRelease = releases[releases.length - 1];
+      result.push([packFormat, `${oldestRelease} – ${newestRelease}`]);
+    }
+  }
+  
+  result.sort((a, b) => a[0] - b[0]);
+  
+  return result;
+}
+
 export async function isVersionInPackFormat(version: string, packFormat: number): Promise<boolean> {
   const versions = await getVersionsByPackFormat(packFormat);
   return versions.includes(version);

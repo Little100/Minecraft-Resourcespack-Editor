@@ -972,8 +972,7 @@ const loadFolderChildren = useCallback(async (folderPath: string) => {
       );
     }
 
-    // pack.mcmeta
-    if (extension === 'mcmeta') {
+    if (extension === 'mcmeta' && fileName === 'pack.mcmeta') {
       return (
         <PackMetaEditor
           content={fileContent}

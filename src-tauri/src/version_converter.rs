@@ -172,22 +172,25 @@ fn update_pack_format_in_json(json_str: &str, new_pack_format: u32) -> Result<St
     // 修改pack_format
     if let Some(pack) = value.get_mut("pack") {
         if let Some(obj) = pack.as_object_mut() {
-            // 检查是否使用1.21.9+的格式
+            // 检查原始文件是否使用1.21.9+的格式
             let has_new_format = obj.contains_key("min_format") || obj.contains_key("max_format");
             
-            if has_new_format {
+            // 移除所有版本相关字段
+            obj.remove("supported_formats");
+            obj.remove("supported_format");
+            obj.remove("min_format");
+            obj.remove("max_format");
+            
+            if new_pack_format >= 69 && has_new_format {
+                // 保持使用新格式
                 obj.insert("min_format".to_string(),
                     Value::Array(vec![Value::Number(new_pack_format.into()), Value::Number(0.into())]));
                 obj.insert("max_format".to_string(),
                     Value::Array(vec![Value::Number(999.into()), Value::Number(0.into())]));
                 obj.insert("pack_format".to_string(), Value::Number(new_pack_format.into()));
             } else {
-                // 使用pack_format
                 obj.insert("pack_format".to_string(), Value::Number(new_pack_format.into()));
             }
-            
-            obj.remove("supported_formats");
-            obj.remove("supported_format");
         }
     }
     
@@ -236,32 +239,42 @@ fn load_version_map_from_file() -> Result<Vec<(u32, String)>, String> {
     let exe_dir = exe_path.parent()
         .ok_or("无法获取父目录")?;
     
+    // 获取当前工作目录
+    let current_dir = std::env::current_dir()
+        .map_err(|e| format!("无法获取当前目录: {}", e))?;
+    
     // 尝试多个可能的路径
     let possible_paths = vec![
+        // 打包后的路径
         exe_dir.join("resources").join("version_map.json"),
-        exe_dir.join("..").join("..").join("version_map").join("version_map.json"),
+        current_dir.join("version_map").join("version_map.json"),
+        current_dir.join("..").join("version_map").join("version_map.json"),
         PathBuf::from("version_map/version_map.json"),
+        PathBuf::from("../version_map/version_map.json"),
+        exe_dir.join("..").join("..").join("version_map").join("version_map.json"),
         exe_dir.join("version_map").join("version_map.json"),
         exe_dir.join("version_map.json"),
         PathBuf::from("version_map.json"),
     ];
     
     for path in &possible_paths {
+        let canonical_path = path.canonicalize().ok();
         if path.exists() {
-            eprintln!("尝试从路径加载: {:?}", path);
             match load_version_map(path) {
                 Ok(versions) => {
-                    eprintln!("成功从 {:?} 加载版本映射", path);
+                    eprintln!("✓ 成功从 {:?} 加载版本映射", canonical_path.unwrap_or_else(|| path.clone()));
                     return Ok(versions);
                 },
-                Err(e) => eprintln!("从 {:?} 加载失败: {}", path, e),
+                Err(e) => eprintln!("✗ 从 {:?} 加载失败: {}", path, e),
             }
-        } else {
-            eprintln!("路径不存在: {:?}", path);
         }
     }
     
-    Err("未找到 version_map.json 文件".to_string())
+    eprintln!("未找到 version_map.json 文件，使用内置版本数据");
+    eprintln!("  当前目录: {:?}", current_dir);
+    eprintln!("  可执行文件目录: {:?}", exe_dir);
+    
+    Err("未找到 version_map.json 文件，已使用备用数据".to_string())
 }
 
 /// 从指定路径加载版本映射
@@ -276,24 +289,50 @@ fn load_version_map(path: &Path) -> Result<Vec<(u32, String)>, String> {
     
     for (k, versions_list) in version_map.resource_pack.iter() {
         if let Ok(pack_format) = k.parse::<u32>() {
-            // 只保留正式版
-            let release_versions: Vec<String> = versions_list.iter()
-                .filter(|v| is_release_version(v))
-                .cloned()
-                .collect();
-            
-            if release_versions.is_empty() {
+            if versions_list.is_empty() {
                 continue;
             }
             
-            // 将版本数组转换为版本范围字符串
-            let version_range = if release_versions.len() == 1 {
-                release_versions[0].clone()
+            // 分离正式版和预览版
+            let mut release_versions: Vec<String> = Vec::new();
+            let mut preview_versions: Vec<String> = Vec::new();
+            
+            for version in versions_list.iter() {
+                if is_release_version(version) {
+                    release_versions.push(version.clone());
+                } else {
+                    preview_versions.push(version.clone());
+                }
+            }
+            
+            // 构建版本范围字符串
+            let version_range = if !release_versions.is_empty() {
+                let release_range = if release_versions.len() == 1 {
+                    release_versions[0].clone()
+                } else {
+                    let newest = &release_versions[0];
+                    let oldest = &release_versions[release_versions.len() - 1];
+                    format!("{} – {}", oldest, newest)
+                };
+                
+                if !preview_versions.is_empty() {
+                    format!("{} (含 {} 个预览版)", release_range, preview_versions.len())
+                } else {
+                    release_range
+                }
+            } else if !preview_versions.is_empty() {
+                // 只有预览版
+                if preview_versions.len() == 1 {
+                    format!("{} (预览版)", preview_versions[0])
+                } else {
+                    let newest = &preview_versions[0];
+                    let oldest = &preview_versions[preview_versions.len() - 1];
+                    format!("{} – {} (预览版)", oldest, newest)
+                }
             } else {
-                let newest = &release_versions[0];
-                let oldest = &release_versions[release_versions.len() - 1];
-                format!("{} – {}", oldest, newest)
+                continue;
             };
+            
             versions.push((pack_format, version_range));
         }
     }

@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { selectZipFile, selectFolder, selectOutputFolder } from '../utils/tauri-api';
-import { getVersionRange, getVersionsWithType, isReleaseVersion } from '../utils/version-map';
+import { getVersionRange, getVersionsWithType, isReleaseVersion, getVersionsByPackFormat } from '../utils/version-map';
 import './VersionConverterModal.css';
 
 interface PackMetadata {
@@ -28,13 +28,38 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
   const [description, setDescription] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableVersions, setAvailableVersions] = useState<Array<[number, string]>>([]);
+  const [availableVersions, setAvailableVersions] = useState<Array<[number, string, string[]]>>([]);
   const [selectedTargetVersion, setSelectedTargetVersion] = useState<string>('');
   const [outputPath, setOutputPath] = useState<string>('');
   const [outputFileName, setOutputFileName] = useState<string>('');
   const [converting, setConverting] = useState(false);
   const [conversionSuccess, setConversionSuccess] = useState(false);
   const [currentVersionHtml, setCurrentVersionHtml] = useState<string>('');
+  const [showPreviewVersions, setShowPreviewVersions] = useState(false);
+  const [versionSearchQuery, setVersionSearchQuery] = useState<string>('');
+  const [showVersionDropdown, setShowVersionDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭下拉框
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowVersionDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // 搜索时自动打开下拉框
+  useEffect(() => {
+    if (versionSearchQuery) {
+      setShowVersionDropdown(true);
+    }
+  }, [versionSearchQuery]);
 
   const handleSelectZip = async () => {
     try {
@@ -84,7 +109,15 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
     const loadVersions = async () => {
       try {
         const versions = await invoke<Array<[number, string]>>('get_supported_versions');
-        setAvailableVersions(versions);
+        // 将后端返回的数据扩展为包含原始版本列表的格式
+        const versionsWithRaw: Array<[number, string, string[]]> = await Promise.all(
+          versions.map(async ([packFormat, displayStr]) => {
+            // 从显示字符串中提取原始版本
+            const rawVersions = await getVersionsByPackFormat(packFormat);
+            return [packFormat, displayStr, rawVersions];
+          })
+        );
+        setAvailableVersions(versionsWithRaw);
       } catch (err) {
         console.error('[VersionConverter] 无法加载版本列表:', err);
       }
@@ -327,25 +360,71 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
     }
   };
 
+  const filteredVersions = availableVersions.filter(([packFormat, displayVersion, rawVersions]) => {
+    // 搜索过滤
+    if (versionSearchQuery) {
+      const query = versionSearchQuery.toLowerCase();
+      
+      // 检查是否匹配显示字符串
+      const matchesDisplay = displayVersion.toLowerCase().includes(query);
+      
+      // 检查是否匹配
+      const matchesPackFormat = packFormat.toString().includes(query);
+      
+      // 检查是否匹配原始版本列表中的任何版本
+      const matchesRawVersion = rawVersions.some(v => v.toLowerCase().includes(query));
+      
+      if (!matchesDisplay && !matchesPackFormat && !matchesRawVersion) {
+        return false;
+      }
+    }
+    
+    // 过滤预览版
+    if (!showPreviewVersions) {
+      const hasPreviewMarker = displayVersion.includes('《预览版》') || displayVersion.includes('(预览版)');
+      const hasReleaseWithPreview = displayVersion.includes('含') && displayVersion.includes('个预览版');
+      if (hasPreviewMarker && !hasReleaseWithPreview) {
+        return false;
+      }
+    }
+    
+    return true;
+  });
+
   const formatMinecraftText = (text: string): string => {
-    const colorMap: { [key: string]: string } = {
+    // 检测当前主题
+    const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+    
+    const colorMapDark: { [key: string]: string } = {
       '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
       '4': '#AA0000', '5': '#AA00AA', '6': '#FFAA00', '7': '#AAAAAA',
       '8': '#555555', '9': '#5555FF', 'a': '#55FF55', 'b': '#55FFFF',
       'c': '#FF5555', 'd': '#FF55FF', 'e': '#FFFF55', 'f': '#FFFFFF',
       'r': 'reset'
     };
+    
+    // 浅色模式下的颜色映射
+    const colorMapLight: { [key: string]: string } = {
+      '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
+      '4': '#AA0000', '5': '#AA00AA', '6': '#CC8800', '7': '#555555',
+      '8': '#333333', '9': '#3333DD', 'a': '#00CC00', 'b': '#00AAAA',
+      'c': '#DD3333', 'd': '#DD33DD', 'e': '#CCAA00', 'f': '#333333',
+      'r': 'reset'
+    };
+
+    const colorMap = isDarkMode ? colorMapDark : colorMapLight;
+    const defaultColor = isDarkMode ? '#AAAAAA' : '#333333';
 
     let result = '';
     let i = 0;
-    let currentColor = '#AAAAAA';
+    let currentColor = defaultColor;
 
     while (i < text.length) {
       if (text[i] === '§' && i + 1 < text.length) {
         const code = text[i + 1].toLowerCase();
         if (colorMap[code]) {
           if (code === 'r') {
-            currentColor = '#AAAAAA';
+            currentColor = defaultColor;
           } else {
             currentColor = colorMap[code];
           }
@@ -497,20 +576,114 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                 <h3>转换设置</h3>
                 
                 <div className="setting-item">
-                  <label className="setting-label">目标版本</label>
-                  <select
-                    className="version-select"
-                    value={selectedTargetVersion}
-                    onChange={(e) => setSelectedTargetVersion(e.target.value)}
-                    disabled={converting}
-                  >
-                    <option value="">-- 请选择目标版本 --</option>
-                    {availableVersions.map(([packFormat, version]) => (
-                      <option key={packFormat} value={version}>
-                        {version} (pack_format: {packFormat})
-                      </option>
-                    ))}
-                  </select>
+                  <label className="setting-label" style={{ marginBottom: '0.5rem' }}>目标版本</label>
+                  
+                  {/* 搜索框和切换开关 */}
+                  <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '0.5rem', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0 }}>
+                      <input
+                        type="text"
+                        className="output-path-input"
+                        placeholder="搜索版本..."
+                        value={versionSearchQuery}
+                        onChange={(e) => setVersionSearchQuery(e.target.value)}
+                        disabled={converting}
+                        style={{ paddingRight: '2.5rem', margin: 0, width: '100%' }}
+                      />
+                      {versionSearchQuery && (
+                        <button
+                          onClick={() => setVersionSearchQuery('')}
+                          style={{
+                            position: 'absolute',
+                            right: '0.5rem',
+                            top: '50%',
+                            transform: 'translateY(-50%)',
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-secondary)',
+                            padding: '0.25rem'
+                          }}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    
+                    <label className="toggle-switch-label" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                      <input
+                        type="checkbox"
+                        className="toggle-switch-input"
+                        checked={showPreviewVersions}
+                        onChange={(e) => setShowPreviewVersions(e.target.checked)}
+                      />
+                      <span className="toggle-switch-slider"></span>
+                      <span className="toggle-switch-text">显示预览版</span>
+                    </label>
+                  </div>
+                  
+                  <div className="custom-select-container" ref={dropdownRef}>
+                    <div
+                      className={`custom-select-trigger ${showVersionDropdown ? 'open' : ''} ${converting ? 'disabled' : ''}`}
+                      onClick={() => !converting && setShowVersionDropdown(!showVersionDropdown)}
+                    >
+                      <span className={selectedTargetVersion ? 'selected-value' : 'placeholder'}>
+                        {selectedTargetVersion
+                          ? (() => {
+                              const v = availableVersions.find(v => v[1] === selectedTargetVersion);
+                              return v ? (
+                                <span className="selected-content">
+                                  <span className="selected-version">{v[1]}</span>
+                                  <span className="selected-format">pack_format: {v[0]}</span>
+                                </span>
+                              ) : selectedTargetVersion;
+                            })()
+                          : '-- 请选择目标版本 --'
+                        }
+                      </span>
+                      <svg
+                        className={`arrow-icon ${showVersionDropdown ? 'open' : ''}`}
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </div>
+                    
+                    {showVersionDropdown && (
+                      <div className="custom-select-options">
+                        {filteredVersions.length > 0 ? (
+                          filteredVersions.map(([packFormat, displayVersion, rawVersions]) => (
+                            <div
+                              key={packFormat}
+                              className={`custom-option ${displayVersion === selectedTargetVersion ? 'selected' : ''}`}
+                              onClick={() => {
+                                setSelectedTargetVersion(displayVersion);
+                                setShowVersionDropdown(false);
+                              }}
+                            >
+                              <div className="option-content">
+                                <span className="version-name">{displayVersion}</span>
+                                <span className="pack-format-badge">format: {packFormat}</span>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="no-options">未找到匹配的版本</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="setting-item">
