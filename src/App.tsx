@@ -687,8 +687,17 @@ function App() {
       {showCreateModal && (
         <CreatePackModal
           onClose={() => setShowCreateModal(false)}
-          onSuccess={() => {
+          onSuccess={async (packPath) => {
             setShowCreateModal(false);
+            try {
+              setLoading(true);
+              const info = await importPackFolder(packPath);
+              setPackInfo(info);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : String(err));
+            } finally {
+              setLoading(false);
+            }
           }}
           templateCacheEnabled={templateCacheEnabled}
         />

@@ -24,7 +24,7 @@ interface DownloadProgress {
 
 interface CreatePackModalProps {
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (packPath: string) => void;
   templateCacheEnabled: boolean;
 }
 const VERSION_OPTIONS = [
@@ -97,7 +97,8 @@ export default function CreatePackModal({
               setDownloadProgress(null);
               setDownloadTaskId(null);
               setLoading(false);
-              onSuccess();
+              const fullPath = `${outputPath}/${packName}`;
+              onSuccess(fullPath);
             }, 500);
           }
           
@@ -107,6 +108,7 @@ export default function CreatePackModal({
               setDownloadProgress(null);
               setDownloadTaskId(null);
               setLoading(false);
+              const fullPath = `${outputPath}/${packName}`;
               setError(progress.error || '下载失败');
               setStep(2);
             }, 1000);
@@ -252,12 +254,13 @@ export default function CreatePackModal({
       setError("请填写所有必填字段");
       return;
     }
+    
+    const fullPath = `${outputPath}/${packName}`;
 
     try {
       setLoading(true);
       setError(null);
 
-      const fullPath = `${outputPath}/${packName}`;
       const minecraftDescription = convertToMinecraftFormat(description);
       await createNewPack(fullPath, packName, packFormat, minecraftDescription);
 
@@ -275,7 +278,7 @@ export default function CreatePackModal({
         }
       }
 
-      onSuccess();
+      onSuccess(fullPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -566,9 +569,10 @@ export default function CreatePackModal({
                 <button
                   className="btn-sm btn-primary"
                   onClick={() => {
-                    setShowLangFallbackDialog(false);
-                    onSuccess();
-                  }}
+                      setShowLangFallbackDialog(false);
+                      const fullPath = `${outputPath}/${packName}`;
+                      onSuccess(fullPath);
+                    }}
                 >
                   确定
                 </button>
