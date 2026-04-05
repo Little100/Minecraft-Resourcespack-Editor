@@ -5,8 +5,11 @@ import { logger } from '../utils/logger';
 import './UpdateDialog.css';
 
 const GITEE_API_BASE = 'https://gitee.com/api/v5';
+const GITHUB_API_BASE = 'https://api.github.com';
 const REPO_OWNER = 'little_100';
 const REPO_NAME = 'minecraft-resourcespack-editor';
+const GITHUB_OWNER = 'Little100';
+const GITHUB_REPO_NAME = 'Minecraft-Resourcespack-Editor';
 const CHANGELOG_RAW_URL = 'https://gitee.com/little_100/minecraft-resourcespack-editor/raw/main/CHANGELOG.md';
 const CURRENT_VERSION = '0.1.6';
 
@@ -23,6 +26,20 @@ interface GiteeRelease {
   }>;
 }
 
+interface GithubRelease {
+  tag_name: string;
+  name: string;
+  body: string;
+  prerelease: boolean;
+  created_at: string;
+  assets: Array<{
+    name: string;
+    browser_download_url: string;
+  }>;
+}
+
+type Release = GiteeRelease | GithubRelease;
+
 function compareVersions(v1: string, v2: string): number {
   const clean1 = v1.replace(/^v/, '');
   const clean2 = v2.replace(/^v/, '');
@@ -37,13 +54,36 @@ function compareVersions(v1: string, v2: string): number {
   return 0;
 }
 
-async function fetchLatestRelease(): Promise<GiteeRelease | null> {
+async function fetchLatestRelease(): Promise<Release | null> {
   try {
     const response = await fetch(
       `${GITEE_API_BASE}/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`
     );
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    return await response.json();
+    if (response.ok) {
+      return await response.json();
+    }
+    if (response.status === 403 || response.status === 404) {
+      logger.warn(`[Update] Gitee API 返回 ${response.status}，尝试从 GitHub 获取`);
+    } else {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+  } catch (error) {
+    logger.warn('[Update] Gitee 获取失败，尝试 GitHub fallback:', error);
+  }
+
+  try {
+    const response = await fetch(
+      `${GITHUB_API_BASE}/repos/${GITHUB_OWNER}/${GITHUB_REPO_NAME}/releases/latest`,
+      {
+        headers: {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'MinecraftPackEditor'
+        }
+      }
+    );
+    if (!response.ok) throw new Error(`GitHub HTTP error! status: ${response.status}`);
+    const data: GithubRelease = await response.json();
+    return data;
   } catch (error) {
     logger.error('获取最新版本失败:', error);
     return null;
