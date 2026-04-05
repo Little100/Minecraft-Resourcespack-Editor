@@ -62,6 +62,8 @@ pub struct PackInfo {
     pub description: String,
     pub resources: HashMap<ResourceType, Vec<ResourceFile>>,
     pub namespaces: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pack_path: Option<String>,
 }
 
 impl MinecraftVersion {
@@ -262,5 +264,6 @@ pub fn scan_pack_directory(root_path: &Path) -> Result<PackInfo, String> {
         description: pack_meta.pack.description,
         resources: final_resources,
         namespaces: final_namespaces,
+        pack_path: None,
     })
 }

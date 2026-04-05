@@ -7,7 +7,6 @@ use lru::LruCache;
 use std::num::NonZeroUsize;
 
 pub struct ImagePreloader {
-    cache: Arc<DashMap<String, String>>,
     lru_cache: Arc<RwLock<LruCache<String, String>>>,
     loading: Arc<DashMap<String, ()>>,
     max_cache_size: usize,
@@ -20,7 +19,6 @@ impl ImagePreloader {
         let concurrent_limit = (cpu_count * 2).max(4);
         
         Self {
-            cache: Arc::new(DashMap::new()),
             lru_cache: Arc::new(RwLock::new(
                 LruCache::new(NonZeroUsize::new(max_cache_size).unwrap())
             )),
@@ -32,13 +30,8 @@ impl ImagePreloader {
 
     #[allow(dead_code)]
     pub fn get(&self, path: &str) -> Option<String> {
-        if let Some(data) = self.cache.get(path) {
-            return Some(data.clone());
-        }
-        
         let mut lru = self.lru_cache.write();
         if let Some(data) = lru.get(path) {
-            self.cache.insert(path.to_string(), data.clone());
             return Some(data.clone());
         }
         
@@ -54,7 +47,7 @@ impl ImagePreloader {
             .to_string();
 
         // 检查是否缓存
-        if self.cache.contains_key(&relative_path) {
+        if self.lru_cache.read().peek(&relative_path).is_some() {
             return Ok(());
         }
 
@@ -79,14 +72,8 @@ impl ImagePreloader {
 
         match rx.await {
             Ok(Ok(data)) => {
-                self.cache.insert(relative_path.clone(), data.clone());
-                
                 let mut lru = self.lru_cache.write();
                 lru.put(relative_path.clone(), data);
-                
-                if self.cache.len() > self.max_cache_size {
-                    self.trim_cache();
-                }
             }
             Ok(Err(e)) => {
                 eprintln!("Failed to load image {}: {}", relative_path, e);
@@ -99,21 +86,6 @@ impl ImagePreloader {
         self.loading.remove(&relative_path);
 
         Ok(())
-    }
-
-    /// 清理缓存
-    fn trim_cache(&self) {
-        let target_size = (self.max_cache_size as f32 * 0.8) as usize;
-        
-        if self.cache.len() > target_size {
-            let keys: Vec<String> = self.cache.iter()
-                .take(self.cache.len() - target_size)
-                .map(|entry| entry.key().clone())
-                .collect();
-            for key in keys {
-                self.cache.remove(&key);
-            }
-        }
     }
 
     pub async fn preload_folder(
@@ -196,13 +168,12 @@ impl ImagePreloader {
                     .to_string_lossy()
                     .to_string();
 
-                if self.cache.contains_key(&relative_path) {
+                if self.lru_cache.read().peek(&relative_path).is_some() {
                     return Ok(());
                 }
 
                 match crate::image_handler::create_thumbnail(path, 512) {
                     Ok(data) => {
-                        self.cache.insert(relative_path.clone(), data.clone());
                         let mut lru = self.lru_cache.write();
                         lru.put(relative_path, data);
                         Ok(())
@@ -221,12 +192,11 @@ impl ImagePreloader {
 
     /// 获取缓存统计
     pub async fn get_stats(&self) -> (usize, usize) {
-        (self.cache.len(), self.loading.len())
+        (self.lru_cache.read().len(), self.loading.len())
     }
 
     /// 清空缓存
     pub async fn clear_cache(&self) {
-        self.cache.clear();
         self.lru_cache.write().clear();
         self.loading.clear();
     }
@@ -235,7 +205,6 @@ impl ImagePreloader {
 impl Clone for ImagePreloader {
     fn clone(&self) -> Self {
         Self {
-            cache: Arc::clone(&self.cache),
             lru_cache: Arc::clone(&self.lru_cache),
             loading: Arc::clone(&self.loading),
             max_cache_size: self.max_cache_size,

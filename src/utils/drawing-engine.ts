@@ -64,6 +64,12 @@ export class OptimizedSelectionMask {
     return mask;
   }
   
+  static fromUint8Array(data: Uint8Array, width: number, height: number): OptimizedSelectionMask {
+    const mask = new OptimizedSelectionMask(width, height);
+    mask.mask.set(data);
+    return mask;
+  }
+  
   getWidth(): number { return this.width; }
   getHeight(): number { return this.height; }
   getRawData(): Uint8Array { return this.mask; }
@@ -199,7 +205,6 @@ export class DrawingEngine {
   private height: number;
   private backBuffer: ImageData | null = null;
   private dirtyRegion: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
-  private textureCache: BrushTextureCache;
   private selectionMask: OptimizedSelectionMask | null = null;
   private pendingOps: DrawOperation[] = [];
   private rafId: number | null = null;
@@ -216,7 +221,6 @@ export class DrawingEngine {
     })!;
     this.width = canvas.width;
     this.height = canvas.height;
-    this.textureCache = new BrushTextureCache();
     this.initBuffers();
   }
   
@@ -237,8 +241,14 @@ export class DrawingEngine {
     this.viewport = bounds;
   }
   
-  setSelectionMask(mask: boolean[][] | null): void {
-    this.selectionMask = mask ? OptimizedSelectionMask.fromBooleanArray(mask) : null;
+  setSelectionMask(mask: { data: Uint8Array; width: number; height: number } | boolean[][] | null): void {
+    if (!mask) {
+      this.selectionMask = null;
+    } else if ('data' in mask && mask.data instanceof Uint8Array) {
+      this.selectionMask = OptimizedSelectionMask.fromUint8Array(mask.data, mask.width, mask.height);
+    } else {
+      this.selectionMask = OptimizedSelectionMask.fromBooleanArray(mask as boolean[][]);
+    }
   }
   
   private isInViewport(x: number, y: number, margin: number = 0): boolean {
@@ -314,18 +324,8 @@ export class DrawingEngine {
       const { minX, minY, maxX, maxY } = this.dirtyRegion;
       const width = maxX - minX + 1;
       const height = maxY - minY + 1;
-      const dirtyData = new ImageData(width, height);
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const srcIdx = ((minY + y) * this.width + (minX + x)) * 4;
-          const dstIdx = (y * width + x) * 4;
-          dirtyData.data[dstIdx] = data[srcIdx];
-          dirtyData.data[dstIdx + 1] = data[srcIdx + 1];
-          dirtyData.data[dstIdx + 2] = data[srcIdx + 2];
-          dirtyData.data[dstIdx + 3] = data[srcIdx + 3];
-        }
-      }
-      this.ctx.putImageData(dirtyData, minX, minY);
+      // U-PERF-01: 使用 putImageData 的 dirty rect 重载，避免 JS 层逐像素复制
+      this.ctx.putImageData(this.backBuffer, 0, 0, minX, minY, width, height);
       this.dirtyRegion = null;
     }
     const drawTime = performance.now() - startTime;
@@ -338,33 +338,42 @@ export class DrawingEngine {
   
   private drawBrushDirect(data: Uint8ClampedArray, cx: number, cy: number, size: number, color: { r: number; g: number; b: number; a: number }): void {
     const radius = size / 2;
+    const radiusSq = radius * radius;
     const alpha = color.a / 100;
     const startX = Math.max(0, Math.floor(cx - radius));
     const startY = Math.max(0, Math.floor(cy - radius));
     const endX = Math.min(this.width - 1, Math.ceil(cx + radius));
     const endY = Math.min(this.height - 1, Math.ceil(cy + radius));
+    // U-PERF-02: 预计算阈值的平方，使用 distance² 做快速裁剪
+    const t03sq = (0.3 * radius) * (0.3 * radius);
+    const t07sq = (0.7 * radius) * (0.7 * radius);
+    const invRadius = 1 / radius;
     for (let y = startY; y <= endY; y++) {
       for (let x = startX; x <= endX; x++) {
         if (this.selectionMask && !this.selectionMask.fastGet(x, y)) continue;
         const dx = x - cx + 0.5;
         const dy = y - cy + 0.5;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const normalizedDist = distance / radius;
-        if (normalizedDist <= 1) {
-          let pixelAlpha: number;
-          if (normalizedDist <= 0.3) pixelAlpha = alpha;
-          else if (normalizedDist <= 0.7) pixelAlpha = alpha * (1 - (normalizedDist - 0.3) / 0.4 * 0.5);
+        const distSq = dx * dx + dy * dy;
+        // 快速裁剪：超出半径的像素直接跳过
+        if (distSq > radiusSq) continue;
+        let pixelAlpha: number;
+        if (distSq <= t03sq) {
+          pixelAlpha = alpha;
+        } else {
+          // 仅在需要渐变时才计算 sqrt
+          const normalizedDist = Math.sqrt(distSq) * invRadius;
+          if (normalizedDist <= 0.7) pixelAlpha = alpha * (1 - (normalizedDist - 0.3) / 0.4 * 0.5);
           else pixelAlpha = alpha * 0.5 * (1 - (normalizedDist - 0.7) / 0.3);
-          const idx = (y * this.width + x) * 4;
-          const srcAlpha = pixelAlpha;
-          const dstAlpha = data[idx + 3] / 255;
-          const outAlpha = srcAlpha + dstAlpha * (1 - srcAlpha);
-          if (outAlpha > 0) {
-            data[idx] = (color.r * srcAlpha + data[idx] * dstAlpha * (1 - srcAlpha)) / outAlpha;
-            data[idx + 1] = (color.g * srcAlpha + data[idx + 1] * dstAlpha * (1 - srcAlpha)) / outAlpha;
-            data[idx + 2] = (color.b * srcAlpha + data[idx + 2] * dstAlpha * (1 - srcAlpha)) / outAlpha;
-            data[idx + 3] = outAlpha * 255;
-          }
+        }
+        const idx = (y * this.width + x) * 4;
+        const srcAlpha = pixelAlpha;
+        const dstAlpha = data[idx + 3] / 255;
+        const outAlpha = srcAlpha + dstAlpha * (1 - srcAlpha);
+        if (outAlpha > 0) {
+          data[idx] = (color.r * srcAlpha + data[idx] * dstAlpha * (1 - srcAlpha)) / outAlpha;
+          data[idx + 1] = (color.g * srcAlpha + data[idx + 1] * dstAlpha * (1 - srcAlpha)) / outAlpha;
+          data[idx + 2] = (color.b * srcAlpha + data[idx + 2] * dstAlpha * (1 - srcAlpha)) / outAlpha;
+          data[idx + 3] = outAlpha * 255;
         }
       }
     }
@@ -431,11 +440,10 @@ export class DrawingEngine {
     }
   }
   
-  getStats(): { frameCount: number; avgDrawTime: number; textureCache: { brush: number; pencil: number } } {
+  getStats(): { frameCount: number; avgDrawTime: number } {
     return {
       frameCount: this.frameCount,
       avgDrawTime: this.frameCount > 0 ? this.totalDrawTime / this.frameCount : 0,
-      textureCache: this.textureCache.getStats()
     };
   }
   
@@ -447,7 +455,6 @@ export class DrawingEngine {
     this.pendingOps = [];
     this.backBuffer = null;
     this.selectionMask = null;
-    this.textureCache.clear();
     this.dirtyRegion = null;
   }
 }

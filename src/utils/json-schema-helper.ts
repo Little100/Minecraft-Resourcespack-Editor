@@ -1,4 +1,5 @@
 import packMetaSchema from './scheme/pack.mcmeta.json';
+import { logger } from './logger';
 
 interface SchemaProperty {
   type?: string | string[];
@@ -44,72 +45,147 @@ function getSchemaAtPath(schema: any, path: string[]): SchemaProperty | null {
 
 export function getJsonPath(text: string, cursorPos: number): string[] {
   const beforeCursor = text.substring(0, cursorPos);
-  const path: string[] = [];
-  
-  let depth = 0;
-  let inString = false;
-  let currentKey = '';
-  let collectingKey = false;
-  
-  for (let i = 0; i < beforeCursor.length; i++) {
-    const char = beforeCursor[i];
-    const prevChar = i > 0 ? beforeCursor[i - 1] : '';
-    
-    if (char === '"' && prevChar !== '\\') {
-      inString = !inString;
-      if (inString) {
-        collectingKey = true;
-        currentKey = '';
-      } else if (collectingKey && beforeCursor[i + 1] === ':') {
-        collectingKey = false;
-      }
-    } else if (inString && collectingKey) {
-      currentKey += char;
-    } else if (!inString) {
-      if (char === '{') {
-        depth++;
-        if (currentKey && !collectingKey) {
-          path.push(currentKey);
-          currentKey = '';
-        }
-      } else if (char === '}') {
-        depth--;
-        if (path.length > 0) {
-          path.pop();
-        }
-      } else if (char === ':' && currentKey) {}
-    }
+
+  interface ScopeFrame {
+    type: 'object' | 'array';
+    index: number;
+    pendingKey: string;
   }
-  
+
+  const stack: ScopeFrame[] = [];
+  const path: string[] = [];
+
+  let i = 0;
+  function readString(): string {
+    i++;
+    let result = '';
+    while (i < beforeCursor.length) {
+      const ch = beforeCursor[i];
+      if (ch === '\\') {
+        result += beforeCursor[i + 1] ?? '';
+        i += 2;
+        continue;
+      }
+      if (ch === '"') {
+        i++;
+        return result;
+      }
+      result += ch;
+      i++;
+    }
+    return result;
+  }
+
+  function peekNonWs(): string | undefined {
+    let j = i;
+    while (j < beforeCursor.length && /\s/.test(beforeCursor[j])) j++;
+    return beforeCursor[j];
+  }
+
+  while (i < beforeCursor.length) {
+    const ch = beforeCursor[i];
+
+    if (/\s/.test(ch)) { i++; continue; }
+
+    if (ch === '"') {
+      const strVal = readString();
+      const top = stack[stack.length - 1];
+      if (top && top.type === 'object' && peekNonWs() === ':') {
+        top.pendingKey = strVal;
+      }
+      continue;
+    }
+
+    if (ch === '{') {
+      const top = stack[stack.length - 1];
+      if (top) {
+        if (top.type === 'object' && top.pendingKey) {
+          path.push(top.pendingKey);
+          top.pendingKey = '';
+        } else if (top.type === 'array') {
+          path.push(`[${top.index}]`);
+        }
+      }
+      stack.push({ type: 'object', index: 0, pendingKey: '' });
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      stack.pop();
+      if (path.length > 0) path.pop();
+      i++;
+      continue;
+    }
+
+    if (ch === '[') {
+      const top = stack[stack.length - 1];
+      if (top) {
+        if (top.type === 'object' && top.pendingKey) {
+          path.push(top.pendingKey);
+          top.pendingKey = '';
+        } else if (top.type === 'array') {
+          path.push(`[${top.index}]`);
+        }
+      }
+      stack.push({ type: 'array', index: 0, pendingKey: '' });
+      i++;
+      continue;
+    }
+
+    if (ch === ']') {
+      stack.pop();
+      if (path.length > 0) path.pop();
+      i++;
+      continue;
+    }
+
+    if (ch === ',') {
+      const top = stack[stack.length - 1];
+      if (top && top.type === 'array') {
+        top.index++;
+      }
+      if (top && top.type === 'object') {
+        top.pendingKey = '';
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === ':') { i++; continue; }
+
+    i++;
+  }
+
   return path;
 }
 
 export function getCompletions(text: string, cursorPos: number, schemaPath: string = 'pack.mcmeta'): CompletionItem[] {
-  console.log('[Schema] getCompletions 被调用');
-  console.log('[Schema] text 长度:', text.length);
-  console.log('[Schema] cursorPos:', cursorPos);
-  console.log('[Schema] schemaPath:', schemaPath);
+  logger.debug('[Schema] getCompletions 被调用');
+  logger.debug('[Schema] text 长度:', text.length);
+  logger.debug('[Schema] cursorPos:', cursorPos);
+  logger.debug('[Schema] schemaPath:', schemaPath);
   
   const completions: CompletionItem[] = [];
   
   if (schemaPath !== 'pack.mcmeta') {
-    console.log('[Schema] 不是 pack.mcmeta，返回空');
+    logger.debug('[Schema] 不是 pack.mcmeta，返回空');
     return completions;
   }
   
   const path = getJsonPath(text, cursorPos);
-  console.log('[Schema] JSON 路径:', path);
+  logger.debug('[Schema] JSON 路径:', path);
   
   const schema = getSchemaAtPath(packMetaSchema, path);
-  console.log('[Schema] 获取到的 schema:', schema ? '存在' : '不存在');
+  logger.debug('[Schema] 获取到的 schema:', schema ? '存在' : '不存在');
   
   if (!schema) {
-    console.log('[Schema] schema 为空，返回空');
+    logger.debug('[Schema] schema 为空，返回空');
     return completions;
   }
   
   if (schema.properties) {
-    console.log('[Schema] 找到 properties，数量:', Object.keys(schema.properties).length);
+    logger.debug('[Schema] 找到 properties，数量:', Object.keys(schema.properties).length);
     for (const [key, prop] of Object.entries(schema.properties)) {
       const property = prop as SchemaProperty;
       let insertText = `"${key}": `;
@@ -171,80 +247,79 @@ export function getCompletions(text: string, cursorPos: number, schemaPath: stri
     }
   }
   
-  console.log('[Schema] 返回补全项数量:', completions.length);
+  logger.debug('[Schema] 返回补全项数量:', completions.length);
   return completions;
-}
-
-function checkDuplicateKeys(obj: any, path: string = ''): string[] {
-  const errors: string[] = [];
-  
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
-    return errors;
-  }
-  
-  // 递归检查嵌套对象
-  for (const key in obj) {
-    const currentPath = path ? `${path}.${key}` : key;
-    if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-      errors.push(...checkDuplicateKeys(obj[key], currentPath));
-    }
-  }
-  
-  return errors;
 }
 
 function detectDuplicateKeysInText(jsonText: string): string[] {
   const errors: string[] = [];
-  const keyPositions: Map<string, string[]> = new Map();
-  
-  try {
-    const keyRegex = /"([^"]+)"\s*:/g;
-    let match;
-    const pathStack: string[] = [];
-    let braceDepth = 0;
-    
-    // 简单的路径跟踪
-    for (let i = 0; i < jsonText.length; i++) {
-      const char = jsonText[i];
-      if (char === '{') {
-        braceDepth++;
-      } else if (char === '}') {
-        braceDepth--;
-        if (pathStack.length > 0) {
-          pathStack.pop();
-        }
+
+  const keysStack: Set<string>[] = [];
+  let i = 0;
+  let line = 1;
+
+  function readString(): string {
+    i++;
+    let result = '';
+    while (i < jsonText.length) {
+      const ch = jsonText[i];
+      if (ch === '\n') line++;
+      if (ch === '\\') {
+        result += jsonText[i + 1] ?? '';
+        i += 2;
+        continue;
       }
+      if (ch === '"') {
+        i++;
+        return result;
+      }
+      result += ch;
+      i++;
     }
-    
-    const lines = jsonText.split('\n');
-    const keysPerObject: Map<number, Set<string>> = new Map();
-    
-    lines.forEach((line, lineIndex) => {
-      const match = line.match(/"([^"]+)"\s*:/);
-      if (match) {
-        const key = match[1];
-        const depth = (line.match(/^\s*/)?.[0].length || 0) / 2;
-        
-        if (!keysPerObject.has(depth)) {
-          keysPerObject.set(depth, new Set());
-        }
-        
-        const keysAtDepth = keysPerObject.get(depth)!;
-        if (keysAtDepth.has(key)) {
-          errors.push(`第 ${lineIndex + 1} 行: 检测到重复的键 "${key}"`);
+    return result;
+  }
+
+  function peekNonWs(): string | undefined {
+    let j = i;
+    while (j < jsonText.length && /\s/.test(jsonText[j])) j++;
+    return jsonText[j];
+  }
+
+  while (i < jsonText.length) {
+    const ch = jsonText[i];
+
+    if (ch === '\n') { line++; i++; continue; }
+    if (/\s/.test(ch)) { i++; continue; }
+
+    if (ch === '"') {
+      const keyLine = line;
+      const strVal = readString();
+      if (keysStack.length > 0 && peekNonWs() === ':') {
+        const currentKeys = keysStack[keysStack.length - 1];
+        if (currentKeys.has(strVal)) {
+          errors.push(`第 ${keyLine} 行: 检测到重复的键 "${strVal}"`);
         } else {
-          keysAtDepth.add(key);
+          currentKeys.add(strVal);
         }
       }
-      
-      if (line.trim() === '}') {
-        const depth = (line.match(/^\s*/)?.[0].length || 0) / 2;
-        keysPerObject.delete(depth + 1);
-      }
-    });
-    
-  } catch (error) {}
-  
+      continue;
+    }
+
+    if (ch === '{') {
+      keysStack.push(new Set<string>());
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      keysStack.pop();
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
   return errors;
 }
 

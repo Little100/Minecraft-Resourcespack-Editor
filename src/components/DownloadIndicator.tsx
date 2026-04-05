@@ -1,29 +1,11 @@
 import { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { Icon } from '@mpe/ui';
+import { logger } from '../utils/logger';
+import { formatSpeed, formatETA } from '../utils/shared';
+import type { DownloadProgress, DownloadTask } from '../types/download';
 import './DownloadIndicator.css';
-
-interface DownloadProgress {
-  task_id: string;
-  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  current: number;
-  total: number;
-  current_file: string | null;
-  speed: number;
-  eta: number | null;
-  error: string | null;
-}
-
-interface DownloadTask {
-  id: string;
-  name: string;
-  task_type: string;
-  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  progress: DownloadProgress;
-  created_at: number;
-  updated_at: number;
-  output_dir: string;
-}
 
 interface DownloadIndicatorProps {
   onShowDetails: () => void;
@@ -41,7 +23,7 @@ export default function DownloadIndicator({ onShowDetails }: DownloadIndicatorPr
       setTasks(allTasks);
       setIsVisible(allTasks.length > 0);
     } catch (error) {
-      console.error('加载下载任务失败:', error);
+      logger.error('加载下载任务失败:', error);
     }
   };
 
@@ -112,20 +94,7 @@ export default function DownloadIndicator({ onShowDetails }: DownloadIndicatorPr
     }
   }, [tasks, hasActiveTasks, isSlideOut]);
 
-  // 格式化速度
-  const formatSpeed = (bytesPerSecond: number): string => {
-    if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
-  };
 
-  // 格式化ETA
-  const formatETA = (seconds: number | null): string => {
-    if (!seconds) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   if (!isVisible) return null;
 
@@ -137,17 +106,11 @@ export default function DownloadIndicator({ onShowDetails }: DownloadIndicatorPr
       <div className="indicator-icon">
         {hasActiveTasks ? (
           <>
-            <svg className="download-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
+            <Icon name="download" size={20} />
             <span className="task-count">{activeTasks.length}</span>
           </>
         ) : (
-          <svg className="check-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
+          <Icon name="check" size={20} />
         )}
       </div>
 

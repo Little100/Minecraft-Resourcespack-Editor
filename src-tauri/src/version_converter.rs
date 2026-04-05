@@ -169,13 +169,15 @@ fn convert_folder_pack(
     }
     
     if output_path.exists() {
+        let output_canonical = output_path.canonicalize().ok();
+        
         fs::remove_dir_all(output_path)
             .map_err(|e| format!("无法删除已存在的输出目录: {}", e))?;
+        
+        copy_dir_all_excluding(input_path, output_path, output_canonical.as_deref())?;
+    } else {
+        copy_dir_all_excluding(input_path, output_path, None)?;
     }
-    
-    let output_canonical = output_path.canonicalize().ok();
-    
-    copy_dir_all_excluding(input_path, output_path, output_canonical.as_deref())?;
     
     // 修改pack.mcmeta
     let mcmeta_path = output_path.join("pack.mcmeta");

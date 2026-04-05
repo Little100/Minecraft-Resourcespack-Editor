@@ -1,0 +1,230 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay, 1000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-xl);
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.overlay-animated {
+  animation: mpe-dialog-overlay-in 200ms ease forwards;
+}
+
+@keyframes mpe-dialog-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.content {
+  position: relative;
+  z-index: var(--z-modal, 2000);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+  outline: none;
+}
+
+.size-sm {
+  width: 380px;
+  max-width: 100%;
+}
+
+.size-md {
+  width: 520px;
+  max-width: 100%;
+}
+
+.size-lg {
+  width: 680px;
+  max-width: 100%;
+}
+
+.size-xl {
+  width: 900px;
+  max-width: 100%;
+}
+
+.size-fullscreen {
+  width: calc(100vw - 48px);
+  height: calc(100vh - 48px);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-xl) var(--space-xl) 0;
+  flex-shrink: 0;
+}
+
+.headerText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+  line-height: var(--line-height-tight);
+}
+
+.description {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: var(--line-height-normal);
+}
+
+.closeButton {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+  padding: 0;
+}
+
+.closeButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.closeButton:active {
+  background: var(--bg-active);
+}
+
+.body {
+  flex: 1;
+  padding: var(--space-xl);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.bodySection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-lg) var(--space-xl);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.footerSection {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.animation-fade {
+  animation: mpe-dialog-fade-in 200ms ease forwards;
+}
+
+@keyframes mpe-dialog-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animation-slide-up {
+  animation: mpe-dialog-slide-up 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes mpe-dialog-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animation-scale {
+  animation: mpe-dialog-scale-in 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes mpe-dialog-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.body::-webkit-scrollbar {
+  width: var(--scrollbar-width, 6px);
+}
+
+.body::-webkit-scrollbar-track {
+  background: var(--scrollbar-track, transparent);
+}
+
+.body::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, #d4d4d8);
+  border-radius: var(--radius-full);
+}
+
+.body::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, #a1a1aa);
+}
+
+body.acrylic-enabled .overlay {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+body.acrylic-enabled .content {
+  background: rgba(var(--bg-primary-rgb), 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] body.acrylic-enabled .content {
+  background: rgba(var(--bg-primary-rgb), 0.75);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.content:focus-visible {
+  outline: none;
+}

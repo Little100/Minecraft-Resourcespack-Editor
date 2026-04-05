@@ -1,43 +1,30 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Icon, useToast, ConfirmDialog } from '@mpe/ui';
+import { logger } from '../utils/logger';
+import { formatSpeed, formatETA } from '../utils/shared';
+import type { DownloadProgress, DownloadTask } from '../types/download';
 import './DownloadDetails.css';
-
-interface DownloadProgress {
-  task_id: string;
-  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  current: number;
-  total: number;
-  current_file: string | null;
-  speed: number;
-  eta: number | null;
-  error: string | null;
-}
-
-interface DownloadTask {
-  id: string;
-  name: string;
-  task_type: string;
-  status: 'pending' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  progress: DownloadProgress;
-  created_at: number;
-  updated_at: number;
-  output_dir: string;
-}
 
 interface DownloadDetailsProps {
   onClose: () => void;
 }
 
 export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
+  const toast = useToast();
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
+  const [confirmDialogState, setConfirmDialogState] = useState<{
+    open: boolean;
+    onConfirm: () => void;
+  }>({ open: false, onConfirm: () => {} });
 
   const loadTasks = async () => {
     try {
       const allTasks = await invoke<DownloadTask[]>('get_all_download_tasks');
       setTasks(allTasks);
     } catch (error) {
-      console.error('加载下载任务失败:', error);
+      logger.error('加载下载任务失败:', error);
     }
   };
 
@@ -82,20 +69,24 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
     try {
       await invoke('cancel_download_task', { taskId });
     } catch (error) {
-      console.error('取消下载失败:', error);
-      alert(`取消下载失败: ${error}`);
+      logger.error('取消下载失败:', error);
+      toast({ message: `取消下载失败: ${error}`, type: 'error' });
     }
   };
 
-  const handleDelete = async (taskId: string) => {
-    if (!confirm('确定要删除此下载任务吗？')) return;
-    
-    try {
-      await invoke('delete_download_task', { taskId });
-    } catch (error) {
-      console.error('删除任务失败:', error);
-      alert(`删除任务失败: ${error}`);
-    }
+  const handleDelete = (taskId: string) => {
+    setConfirmDialogState({
+      open: true,
+      onConfirm: async () => {
+        setConfirmDialogState(prev => ({ ...prev, open: false }));
+        try {
+          await invoke('delete_download_task', { taskId });
+        } catch (error) {
+          logger.error('删除任务失败:', error);
+          toast({ message: `删除任务失败: ${error}`, type: 'error' });
+        }
+      },
+    });
   };
 
   const handleClearCompleted = async () => {
@@ -105,22 +96,11 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
         loadTasks();
       }
     } catch (error) {
-      console.error('清理任务失败:', error);
+      logger.error('清理任务失败:', error);
     }
   };
 
-  const formatSpeed = (bytesPerSecond: number): string => {
-    if (bytesPerSecond < 1024) return `${bytesPerSecond.toFixed(0)} B/s`;
-    if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
-    return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
-  };
 
-  const formatETA = (seconds: number | null): string => {
-    if (!seconds) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   const formatDate = (timestamp: number): string => {
     return new Date(timestamp * 1000).toLocaleString('zh-CN');
@@ -165,10 +145,7 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
               清理已完成
             </button>
             <button className="dialog-close" onClick={onClose}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              <Icon name="close" size={16} />
             </button>
           </div>
         </div>
@@ -176,11 +153,7 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
         <div className="dialog-content">
           {tasks.length === 0 ? (
             <div className="empty-state">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
+              <Icon name="download" size={32} />
               <p>暂无下载任务</p>
             </div>
           ) : (
@@ -204,10 +177,7 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
                           onClick={() => handleCancel(task.id)}
                           title="取消下载"
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                          </svg>
+                          <Icon name="close" size={16} />
                         </button>
                       )}
                       {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
@@ -216,10 +186,7 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
                           onClick={() => handleDelete(task.id)}
                           title="删除任务"
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          </svg>
+                          <Icon name="delete" size={16} />
                         </button>
                       )}
                     </div>
@@ -255,11 +222,7 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
 
                   {task.progress.error && (
                     <div className="task-error">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="8" x2="12" y2="12"></line>
-                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                      </svg>
+                      <Icon name="report-issue" size={16} />
                       <span>{task.progress.error}</span>
                     </div>
                   )}
@@ -273,6 +236,17 @@ export default function DownloadDetails({ onClose }: DownloadDetailsProps) {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDialogState.open}
+        title="确认删除"
+        message="确定要删除此下载任务吗？"
+        variant="warning"
+        confirmText="确定"
+        cancelText="取消"
+        onConfirm={confirmDialogState.onConfirm}
+        onCancel={() => setConfirmDialogState(prev => ({ ...prev, open: false }))}
+      />
     </>
   );
 }

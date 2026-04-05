@@ -1,96 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getAllPackFormatsWithReleases, getVersionRange, getVersionsWithType } from '../utils/version-map';
+import { Icon, useToast } from '@mpe/ui';
+import { logger } from '../utils/logger';
+import { parseMinecraftText } from '../utils/minecraft-text';
 
 interface PackMetaVisualEditorProps {
   initialData: any;
   onApply: (data: any) => void;
   onCancel: () => void;
 }
-
-const MINECRAFT_COLORS: { [key: string]: string } = {
-  '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
-  '4': '#AA0000', '5': '#AA00AA', '6': '#FFAA00', '7': '#AAAAAA',
-  '8': '#555555', '9': '#5555FF', 'a': '#55FF55', 'b': '#55FFFF',
-  'c': '#FF5555', 'd': '#FF55FF', 'e': '#FFFF55', 'f': '#FFFFFF',
-};
-
-const parseMinecraftText = (text: string): React.ReactElement[] => {
-  if (typeof text !== 'string') {
-    return [<span key="0">{String(text)}</span>];
-  }
-
-  const parts: React.ReactElement[] = [];
-  let currentIndex = 0;
-  let currentColor = '#FFFFFF';
-  let isBold = false;
-  let isItalic = false;
-  let isUnderline = false;
-  let isStrikethrough = false;
-
-  const regex = /§([0-9a-fklmnor])/gi;
-  let match;
-  let lastIndex = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const textBefore = text.substring(lastIndex, match.index);
-      parts.push(
-        <span
-          key={currentIndex++}
-          style={{
-            color: currentColor,
-            fontWeight: isBold ? 'bold' : 'normal',
-            fontStyle: isItalic ? 'italic' : 'normal',
-            textDecoration: `${isUnderline ? 'underline' : ''} ${isStrikethrough ? 'line-through' : ''}`.trim() || 'none',
-          }}
-        >
-          {textBefore}
-        </span>
-      );
-    }
-
-    const code = match[1].toLowerCase();
-    
-    if (MINECRAFT_COLORS[code]) {
-      currentColor = MINECRAFT_COLORS[code];
-    } else if (code === 'l') {
-      isBold = true;
-    } else if (code === 'o') {
-      isItalic = true;
-    } else if (code === 'n') {
-      isUnderline = true;
-    } else if (code === 'm') {
-      isStrikethrough = true;
-    } else if (code === 'r') {
-      currentColor = '#FFFFFF';
-      isBold = false;
-      isItalic = false;
-      isUnderline = false;
-      isStrikethrough = false;
-    }
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    const remainingText = text.substring(lastIndex);
-    parts.push(
-      <span
-        key={currentIndex++}
-        style={{
-          color: currentColor,
-          fontWeight: isBold ? 'bold' : 'normal',
-          fontStyle: isItalic ? 'italic' : 'normal',
-          textDecoration: `${isUnderline ? 'underline' : ''} ${isStrikethrough ? 'line-through' : ''}`.trim() || 'none',
-        }}
-      >
-        {remainingText}
-      </span>
-    );
-  }
-
-  return parts.length > 0 ? parts : [<span key="0">{text}</span>];
-};
 
 // 颜色列表
 const COLOR_OPTIONS = [
@@ -124,6 +42,8 @@ const FORMAT_OPTIONS = [
 type VersionMode = 'legacy' | 'supported' | 'new';
 
 export default function PackMetaVisualEditor({ initialData, onApply, onCancel }: PackMetaVisualEditorProps) {
+  const toast = useToast();
+
   // 版本控制
   const [versionMode, setVersionMode] = useState<VersionMode>('legacy');
   
@@ -160,7 +80,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
   });
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showModeHelp, setShowModeHelp] = useState(false);
-  const textareaRef = useState<HTMLTextAreaElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   
   // 语言配置
   const [languages, setLanguages] = useState<{ [key: string]: { name: string; region: string; bidirectional: boolean } }>({});
@@ -240,7 +160,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
       const formats = await getAllPackFormatsWithReleases();
       setAllFormats(formats);
     } catch (error) {
-      console.error('加载版本数据失败:', error);
+      logger.error('加载版本数据失败:', error);
     }
   };
 
@@ -252,7 +172,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
       const versions = await getVersionsWithType(packFormat);
       setAllVersionsList(versions);
     } catch (error) {
-      console.error('获取版本范围失败:', error);
+      logger.error('获取版本范围失败:', error);
       setVersionRange('未知');
     }
   };
@@ -315,7 +235,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
     if (!code) return;
     
     if (languages[code]) {
-      alert('该语言代码已存在！');
+      toast({ message: '该语言代码已存在！', type: 'warning' });
       return;
     }
     
@@ -376,7 +296,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
   };
 
   const insertColorCode = (code: string) => {
-    const textarea = textareaRef[0];
+    const textarea = textareaRef.current;
     if (!textarea) return;
 
     const start = textarea.selectionStart;
@@ -436,10 +356,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
         }}>
           <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
             <p style={{ margin: '0 0 0.75rem 0', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
-                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-              </svg>
+              <Icon name="book" size={16} />
               版本控制模式说明
             </p>
             <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
@@ -450,11 +367,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
                 <strong>多版本兼容模式</strong>：使用 <code style={{ background: 'var(--bg-primary)', padding: '0.125rem 0.25rem', borderRadius: '3px' }}>supported_formats</code>，让资源包支持多个格式版本（1.20-1.21.5）
                 <br />
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                    <line x1="12" y1="9" x2="12" y2="13"></line>
-                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                  </svg>
+                  <Icon name="warning" size={12} />
                   注意：使用此模式会禁用 1.21.9+ 的新版格式控制
                 </span>
               </li>
@@ -462,11 +375,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
                 <strong>新版模式</strong>：使用 <code style={{ background: 'var(--bg-primary)', padding: '0.125rem 0.25rem', borderRadius: '3px' }}>min_format</code> 和 <code style={{ background: 'var(--bg-primary)', padding: '0.125rem 0.25rem', borderRadius: '3px' }}>max_format</code>，支持次版本号控制（仅 1.21.9+）
                 <br />
                 <span style={{ color: 'var(--text-tertiary)', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginTop: '0.25rem' }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <path d="M12 16v-4"></path>
-                    <path d="M12 8h.01"></path>
-                  </svg>
+                  <Icon name="info" size={12} />
                   格式：[主版本, 次版本]，如 [69, 0] = 1.21.9
                 </span>
               </li>
@@ -768,11 +677,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
               alignItems: 'flex-start',
               gap: '0.5rem'
             }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '0.125rem' }}>
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg>
+              <Icon name="warning" size={16} style={{ flexShrink: 0, marginTop: '0.125rem' }} />
               <span>警告：使用 supported_formats 会禁用 1.21.9+ 的新版 min/max_format 系统</span>
             </div>
           </div>
@@ -886,11 +791,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
               lineHeight: '1.5'
             }}>
               <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <path d="M12 16v-4"></path>
-                  <path d="M12 8h.01"></path>
-                </svg>
+                <Icon name="info" size={16} />
                 格式说明
               </div>
               <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
@@ -925,9 +826,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
                 gap: '0.5rem'
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path>
-              </svg>
+              <Icon name="droplet" size={16} />
               {showColorPicker ? '隐藏' : '显示'}颜色和格式选择器
             </button>
           </div>
@@ -1013,7 +912,7 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
           </div>
 
           <textarea
-            ref={(el) => { textareaRef[0] = el; }}
+            ref={textareaRef}
             className="editor-field-input editor-field-textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -1060,21 +959,14 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
               gap: '0.5rem'
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+            <Icon name="plus" size={16} />
             添加语言
           </button>
         </div>
 
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: '1.6' }}>
           <p style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '0.125rem' }}>
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M12 16v-4"></path>
-              <path d="M12 8h.01"></path>
-            </svg>
+            <Icon name="info" size={16} style={{ flexShrink: 0, marginTop: '0.125rem' }} />
             <span>在客户端动态注册新的语言选项，需同时在 assets/minecraft/lang/ 提供对应的语言文件</span>
           </p>
         </div>
@@ -1177,21 +1069,14 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
               gap: '0.5rem'
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+            <Icon name="plus" size={16} />
             添加规则
           </button>
         </div>
 
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: '1.6' }}>
           <p style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '0.125rem' }}>
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M12 16v-4"></path>
-              <path d="M12 8h.01"></path>
-            </svg>
+            <Icon name="info" size={16} style={{ flexShrink: 0, marginTop: '0.125rem' }} />
             <span>选择性隐藏下层包的文件（1.19+），仅对加载顺序靠前的包生效。路径支持正则表达式</span>
           </p>
         </div>
@@ -1287,21 +1172,14 @@ export default function PackMetaVisualEditor({ initialData, onApply, onCancel }:
               gap: '0.5rem'
             }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
+            <Icon name="plus" size={16} />
             添加覆盖层
           </button>
         </div>
 
         <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '1rem', lineHeight: '1.6' }}>
           <p style={{ margin: 0, display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: '0.125rem' }}>
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M12 16v-4"></path>
-              <path d="M12 8h.01"></path>
-            </svg>
+            <Icon name="info" size={16} style={{ flexShrink: 0, marginTop: '0.125rem' }} />
             <span>为特定版本条件提供增量资源，覆盖基础包内容，避免重复文件</span>
           </p>
         </div>

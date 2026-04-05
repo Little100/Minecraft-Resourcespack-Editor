@@ -1,4 +1,6 @@
 // 我也不知道为什么突然这个文件在我的前端怎么都读取不了...所以加了这一行注释重新读取 
+import { logger } from './logger';
+
 export function createGPUContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   const ctx = canvas.getContext('2d', {
     alpha: true,
@@ -12,7 +14,7 @@ export function createGPUContext(canvas: HTMLCanvasElement): CanvasRenderingCont
     
     // 检查是否支持GPU加速
     const attrs = ctx.getContextAttributes();
-    console.log('[GPU加速] Canvas上下文属性:', attrs);
+    logger.debug('[GPU加速] Canvas上下文属性:', attrs);
   }
   
   return ctx;
@@ -21,7 +23,6 @@ export function createGPUContext(canvas: HTMLCanvasElement): CanvasRenderingCont
 export class OffscreenRenderer {
   private offscreen: OffscreenCanvas | null = null;
   private ctx: OffscreenCanvasRenderingContext2D | null = null;
-  private worker: Worker | null = null;
   
   constructor(width: number, height: number) {
     if (typeof OffscreenCanvas !== 'undefined') {
@@ -32,9 +33,9 @@ export class OffscreenRenderer {
         willReadFrequently: false
       }) as OffscreenCanvasRenderingContext2D | null;
       
-      console.log('[GPU加速] OffscreenCanvas创建成功:', width, 'x', height);
+      logger.debug('[GPU加速] OffscreenCanvas创建成功:', width, 'x', height);
     } else {
-      console.warn('[GPU加速] OffscreenCanvas不支持,降级到普通Canvas');
+      logger.warn('[GPU加速] OffscreenCanvas不支持,降级到普通Canvas');
     }
   }
   
@@ -60,10 +61,6 @@ export class OffscreenRenderer {
   destroy(): void {
     this.offscreen = null;
     this.ctx = null;
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-    }
   }
 }
 
@@ -98,7 +95,7 @@ export class BatchDrawOptimizer {
     
     const duration = performance.now() - startTime;
     if (duration > 16) {
-      console.log(`[GPU批量绘制] 处理${ops.length}个操作耗时: ${duration.toFixed(2)}ms`);
+      logger.debug(`[GPU批量绘制] 处理${ops.length}个操作耗时: ${duration.toFixed(2)}ms`);
     }
     
     this.isProcessing = false;
@@ -168,8 +165,8 @@ export function enableCanvasAcceleration(canvas: HTMLCanvasElement): void {
   
   // 验证
   const computedStyle = window.getComputedStyle(canvas);
-  console.log('[GPU加速] Canvas硬件加速已启用');
-  console.log('[GPU加速] willChange:', computedStyle.willChange);
-  console.log('[GPU加速] transform:', computedStyle.transform);
-  console.log('[GPU加速] isolation:', computedStyle.isolation);
+  logger.debug('[GPU加速] Canvas硬件加速已启用');
+  logger.debug('[GPU加速] willChange:', computedStyle.willChange);
+  logger.debug('[GPU加速] transform:', computedStyle.transform);
+  logger.debug('[GPU加速] isolation:', computedStyle.isolation);
 }

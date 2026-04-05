@@ -1,5 +1,6 @@
 import { open } from '@tauri-apps/plugin-shell';
 import { invoke } from '@tauri-apps/api/core';
+import { logger } from './logger';
 
 // Gitee API 配置
 const GITEE_API_BASE = 'https://gitee.com/api/v5';
@@ -54,7 +55,7 @@ async function fetchLatestRelease(): Promise<GiteeRelease | null> {
     const data: GiteeRelease = await response.json();
     return data;
   } catch (error) {
-    console.error('获取最新版本失败:', error);
+    logger.error('获取最新版本失败:', error);
     return null;
   }
 }
@@ -64,7 +65,7 @@ async function fetchChangelog(): Promise<string | null> {
     const changelog = await invoke<string>('fetch_url', { url: CHANGELOG_RAW_URL });
     return changelog;
   } catch (error) {
-    console.error('获取 CHANGELOG 失败:', error);
+    logger.error('获取 CHANGELOG 失败:', error);
     try {
       const response = await fetch(CHANGELOG_RAW_URL);
       if (!response.ok) {
@@ -73,7 +74,7 @@ async function fetchChangelog(): Promise<string | null> {
       const text = await response.text();
       return text;
     } catch (fetchError) {
-      console.error('浏览器 fetch 也失败:', fetchError);
+      logger.error('浏览器 fetch 也失败:', fetchError);
       return null;
     }
   }
@@ -661,23 +662,23 @@ function showChangelogModal(changelog: string, latestVersion?: string) {
 
 export async function checkForUpdates(): Promise<boolean> {
   try {
-    console.log('正在检查更新...');
+    logger.info('正在检查更新...');
     const latestRelease = await fetchLatestRelease();
     
     if (!latestRelease) {
-      console.log('无法获取最新版本信息');
+      logger.info('无法获取最新版本信息');
       return false;
     }
     
     const latestVersion = latestRelease.tag_name;
     const currentVersion = `v${CURRENT_VERSION}`;
     
-    console.log(`当前版本: ${currentVersion}`);
-    console.log(`最新版本: ${latestVersion}`);
+    logger.debug(`当前版本: ${currentVersion}`);
+    logger.debug(`最新版本: ${latestVersion}`);
     
     // 比较版本号
     if (compareVersions(latestVersion, currentVersion) > 0) {
-      console.log(`发现新版本: ${latestVersion}`);
+      logger.info(`发现新版本: ${latestVersion}`);
       
       const windowsAsset = latestRelease.assets.find(
         asset => asset.name.endsWith('.msi') || asset.name.endsWith('.exe')
@@ -686,12 +687,12 @@ export async function checkForUpdates(): Promise<boolean> {
       showUpdateDialog(latestVersion, latestRelease.body, windowsAsset?.browser_download_url);
       return true;
     } else {
-      console.log('当前已是最新版本');
+      logger.info('当前已是最新版本');
     }
     
     return false;
   } catch (error) {
-    console.error('检查更新失败:', error);
+    logger.error('检查更新失败:', error);
     return false;
   }
 }
@@ -727,7 +728,7 @@ export async function checkForUpdatesSilent() {
       available: false,
     };
   } catch (error) {
-    console.error('检查更新失败:', error);
+    logger.error('检查更新失败:', error);
     return {
       available: false,
       error: String(error),
@@ -762,7 +763,7 @@ export async function manualCheckUpdate() {
       }
     }
   } catch (error) {
-    console.error('更新失败:', error);
+    logger.error('更新失败:', error);
     showErrorDialog(`检查更新失败: ${error}`);
   }
 }

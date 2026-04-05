@@ -1,16 +1,36 @@
+use crate::constants;
 use crate::image_handler::{get_image_info, ImageInfo};
 use crate::pack_parser::{scan_pack_directory, PackInfo};
+use crate::pack_merger::{
+    preview_merge, execute_merge_async, PackSourceType, MergePreview, MergeResult,
+    MergeSourceInput, MergeConfig,
+};
+use crate::path_security::{resolve_pack_path, get_pack_base_path};
 use crate::preloader::ImagePreloader;
 use crate::zip_handler::{
     cleanup_temp_files, create_zip, extract_zip, get_temp_extract_dir, validate_pack_zip,
 };
 use font_kit::source::SystemSource;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use tauri::State;
 use regex::Regex;
 use rayon::prelude::*;
+
+fn find_available_extract_path(parent: &Path, stem: &str) -> PathBuf {
+    let mut candidate = parent.join(stem);
+    let mut counter = 2;
+
+    while candidate.exists() {
+        candidate = parent.join(format!("{}_{}", stem, counter));
+        counter += 1;
+    }
+
+    candidate
+}
 
 /// 应用状态
 pub struct AppState {
@@ -24,7 +44,7 @@ impl Default for AppState {
         Self {
             current_pack_path: Mutex::new(None),
             current_pack_info: Mutex::new(None),
-            preloader: Arc::new(ImagePreloader::new(200)),
+            preloader: Arc::new(ImagePreloader::new(constants::PRELOADER_CACHE_SIZE)),
         }
     }
 }
@@ -42,24 +62,33 @@ pub async fn import_pack_zip(
         return Err("Invalid resource pack: pack.mcmeta not found".to_string());
     }
 
-    // 解压到临时目录
-    let temp_dir = get_temp_extract_dir();
-    let extract_path = temp_dir.join(
-        zip_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string(),
-    );
+    let zip_canon = fs::canonicalize(zip_path)
+        .map_err(|e| format!("无法访问 ZIP 文件: {}", e))?;
+    let zip_path = zip_canon.as_path();
+
+    let parent = zip_path
+        .parent()
+        .ok_or_else(|| "无法确定 ZIP 所在目录".to_string())?;
+
+    let stem = zip_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "pack".to_string());
+
+    let extract_path = find_available_extract_path(parent, &stem);
 
     extract_zip(zip_path, &extract_path)?;
 
     // 扫描材质包
-    let pack_info = scan_pack_directory(&extract_path)?;
+    let mut pack_info = scan_pack_directory(&extract_path)?;
+
+    // 添加解压路径
+    pack_info.pack_path = Some(extract_path.to_string_lossy().to_string());
 
     // 保存状态
-    *state.current_pack_path.lock().unwrap() = Some(extract_path);
-    *state.current_pack_info.lock().unwrap() = Some(pack_info.clone());
+    *state.current_pack_path.lock() = Some(extract_path);
+    *state.current_pack_info.lock() = Some(pack_info.clone());
 
     Ok(pack_info)
 }
@@ -88,12 +117,12 @@ pub async fn import_pack_folder(
         return Err("Folder does not exist".to_string());
     }
 
-    // 扫描材质包(即使没有pack.mcmeta也允许导入)
+    // 扫描材质包
     let pack_info = scan_pack_directory(folder_path)?;
 
     // 保存状态
-    *state.current_pack_path.lock().unwrap() = Some(folder_path.to_path_buf());
-    *state.current_pack_info.lock().unwrap() = Some(pack_info.clone());
+    *state.current_pack_path.lock() = Some(folder_path.to_path_buf());
+    *state.current_pack_info.lock() = Some(pack_info.clone());
 
     Ok(pack_info)
 }
@@ -101,14 +130,14 @@ pub async fn import_pack_folder(
 /// 获取当前材质包信息
 #[tauri::command]
 pub async fn get_current_pack_info(state: State<'_, AppState>) -> Result<Option<PackInfo>, String> {
-    let pack_info = state.current_pack_info.lock().unwrap();
+    let pack_info = state.current_pack_info.lock();
     Ok(pack_info.clone())
 }
 
 /// 获取当前材质包路径
 #[tauri::command]
 pub async fn get_current_pack_path(state: State<'_, AppState>) -> Result<String, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let pack_path = state.current_pack_path.lock();
     match pack_path.as_ref() {
         Some(path) => Ok(path.to_string_lossy().to_string()),
         None => Err("No pack loaded".to_string()),
@@ -122,22 +151,7 @@ pub async fn get_image_thumbnail(
     max_size: u32,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
-
-        match pack_path.as_ref() {
-            Some(base_path) => {
-                let path = Path::new(&image_path);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    base_path.join(path)
-                }
-            }
-            None => PathBuf::from(&image_path),
-        }
-    };
-
+    let full_path = resolve_pack_path(&image_path, &state.current_pack_path)?;
     crate::image_handler::create_thumbnail_async(full_path, max_size).await
 }
 
@@ -147,30 +161,15 @@ pub async fn get_image_preview(
     size: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
-
-        match pack_path.as_ref() {
-            Some(base_path) => {
-                let path = Path::new(&image_path);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    base_path.join(path)
-                }
-            }
-            None => PathBuf::from(&image_path),
-        }
-    };
+    let full_path = resolve_pack_path(&image_path, &state.current_pack_path)?;
 
     let max_size = match size.as_str() {
-        "thumbnail" => 128, // 缩略
-        "preview" => 512,   // 预览
-        "full" => 2048,     // 全图
-        _ => 512,           // 默认
+        "thumbnail" => constants::IMAGE_SIZE_THUMBNAIL,
+        "preview" => constants::IMAGE_SIZE_PREVIEW,
+        "full" => constants::IMAGE_SIZE_FULL,
+        _ => constants::IMAGE_SIZE_DEFAULT,
     };
 
-    // 使用异步
     crate::image_handler::create_thumbnail_async(full_path, max_size).await
 }
 
@@ -180,36 +179,17 @@ pub async fn get_image_details(
     image_path: String,
     state: State<'_, AppState>,
 ) -> Result<ImageInfo, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&image_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => PathBuf::from(&image_path),
-    };
-
+    let full_path = resolve_pack_path(&image_path, &state.current_pack_path)?;
     get_image_info(&full_path)
 }
 
 /// 导出材质包
 #[tauri::command]
 pub async fn export_pack(output_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    match pack_path.as_ref() {
-        Some(path) => {
-            let output = Path::new(&output_path);
-            create_zip(path, output)?;
-            Ok(())
-        }
-        None => Err("No pack loaded".to_string()),
-    }
+    let path = get_pack_base_path(&state.current_pack_path)?;
+    let output = Path::new(&output_path);
+    create_zip(&path, output)?;
+    Ok(())
 }
 
 /// 清理临时文件
@@ -224,49 +204,19 @@ pub async fn read_file_content(
     file_path: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
-
-        match pack_path.as_ref() {
-            Some(base_path) => {
-                let path = Path::new(&file_path);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    base_path.join(path)
-                }
-            }
-            None => PathBuf::from(&file_path),
-        }
-    };
-
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
     tokio::fs::read_to_string(&full_path)
         .await
         .map_err(|e| format!("Failed to read file: {}", e))
 }
 
-/// 写入文件内容
+/// 读取文件内容
 #[tauri::command]
 pub async fn read_file_binary(
     file_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<u8>, String> {
-    let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
-
-        match pack_path.as_ref() {
-            Some(base_path) => {
-                let path = Path::new(&file_path);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    base_path.join(path)
-                }
-            }
-            None => PathBuf::from(&file_path),
-        }
-    };
-
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
     tokio::fs::read(&full_path)
         .await
         .map_err(|e| format!("Failed to read file: {}", e))
@@ -278,24 +228,7 @@ pub async fn write_file_content(
     content: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
-
-        match pack_path.as_ref() {
-            Some(base_path) => {
-                let path = Path::new(&file_path);
-                if path.is_absolute() {
-                    path.to_path_buf()
-                } else {
-                    base_path.join(path)
-                }
-            }
-            None => {
-                // 如果没有加载材质包，尝试直接使用路径
-                PathBuf::from(&file_path)
-            }
-        }
-    };
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
 
     // 创建父目录
     if let Some(parent) = full_path.parent() {
@@ -316,30 +249,19 @@ pub async fn create_new_file(
     content: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&file_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
 
     // 创建父目录
     if let Some(parent) = full_path.parent() {
-        std::fs::create_dir_all(parent)
+        tokio::fs::create_dir_all(parent)
+            .await
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
     // 写入文件
-    std::fs::write(&full_path, content).map_err(|e| format!("Failed to create file: {}", e))?;
+    tokio::fs::write(&full_path, content)
+        .await
+        .map_err(|e| format!("Failed to create file: {}", e))?;
 
     Ok(())
 }
@@ -350,56 +272,30 @@ pub async fn create_new_folder(
     folder_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&folder_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
-
-    // 创建文件夹
-    std::fs::create_dir_all(&full_path).map_err(|e| format!("Failed to create folder: {}", e))?;
-
+    let full_path = resolve_pack_path(&folder_path, &state.current_pack_path)?;
+    tokio::fs::create_dir_all(&full_path)
+        .await
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
     Ok(())
 }
 
 /// 删除文件
 #[tauri::command]
 pub async fn delete_file(file_path: String, state: State<'_, AppState>) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
 
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&file_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
-
-    // 判断是文件还是目录
-    let metadata =
-        std::fs::metadata(&full_path).map_err(|e| format!("Failed to get file metadata: {}", e))?;
+    let metadata = tokio::fs::metadata(&full_path)
+        .await
+        .map_err(|e| format!("Failed to get file metadata: {}", e))?;
 
     if metadata.is_dir() {
-        std::fs::remove_dir_all(&full_path)
+        tokio::fs::remove_dir_all(&full_path)
+            .await
             .map_err(|e| format!("Failed to delete folder: {}", e))?;
     } else {
-        std::fs::remove_file(&full_path).map_err(|e| format!("Failed to delete file: {}", e))?;
+        tokio::fs::remove_file(&full_path)
+            .await
+            .map_err(|e| format!("Failed to delete file: {}", e))?;
     }
 
     Ok(())
@@ -412,37 +308,11 @@ pub async fn rename_file(
     new_path: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let full_old_path = resolve_pack_path(&old_path, &state.current_pack_path)?;
+    let full_new_path = resolve_pack_path(&new_path, &state.current_pack_path)?;
 
-    let full_old_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&old_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
-
-    let full_new_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&new_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
-
-    std::fs::rename(&full_old_path, &full_new_path)
+    tokio::fs::rename(&full_old_path, &full_new_path)
+        .await
         .map_err(|e| format!("Failed to rename file: {}", e))?;
 
     Ok(())
@@ -451,38 +321,28 @@ pub async fn rename_file(
 /// 获取pack.mcmeta内容
 #[tauri::command]
 pub async fn get_pack_mcmeta(state: State<'_, AppState>) -> Result<String, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    match pack_path.as_ref() {
-        Some(path) => {
-            let mcmeta_path = path.join("pack.mcmeta");
-            std::fs::read_to_string(mcmeta_path)
-                .map_err(|e| format!("Failed to read pack.mcmeta: {}", e))
-        }
-        None => Err("No pack loaded".to_string()),
-    }
+    let path = get_pack_base_path(&state.current_pack_path)?;
+    let mcmeta_path = path.join("pack.mcmeta");
+    tokio::fs::read_to_string(mcmeta_path)
+        .await
+        .map_err(|e| format!("Failed to read pack.mcmeta: {}", e))
 }
 
 /// 更新pack.mcmeta
 #[tauri::command]
 pub async fn update_pack_mcmeta(content: String, state: State<'_, AppState>) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let path = get_pack_base_path(&state.current_pack_path)?;
+    let mcmeta_path = path.join("pack.mcmeta");
+    tokio::fs::write(&mcmeta_path, &content)
+        .await
+        .map_err(|e| format!("Failed to write pack.mcmeta: {}", e))?;
 
-    match pack_path.as_ref() {
-        Some(path) => {
-            let mcmeta_path = path.join("pack.mcmeta");
-            std::fs::write(mcmeta_path, content)
-                .map_err(|e| format!("Failed to write pack.mcmeta: {}", e))?;
+    // 重新扫描材质包
+    let pack_info = scan_pack_directory(&path)?;
+    let mut info_guard = state.current_pack_info.lock();
+    *info_guard = Some(pack_info);
 
-            // 重新扫描材质包
-            let pack_info = scan_pack_directory(path)?;
-            drop(pack_path);
-            *state.current_pack_info.lock().unwrap() = Some(pack_info);
-
-            Ok(())
-        }
-        None => Err("No pack loaded".to_string()),
-    }
+    Ok(())
 }
 
 /// 创建新材质包
@@ -499,8 +359,8 @@ pub async fn create_new_pack(
 
     // 自动加载新创建的材质包
     let pack_info = crate::pack_parser::scan_pack_directory(path)?;
-    *state.current_pack_path.lock().unwrap() = Some(path.to_path_buf());
-    *state.current_pack_info.lock().unwrap() = Some(pack_info);
+    *state.current_pack_path.lock() = Some(path.to_path_buf());
+    *state.current_pack_info.lock() = Some(pack_info);
 
     Ok(())
 }
@@ -508,8 +368,8 @@ pub async fn create_new_pack(
 /// 为物品创建模型
 #[tauri::command]
 pub async fn create_item_model(item_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let pack_path_guard = state.current_pack_path.lock().unwrap();
-    let pack_info_guard = state.current_pack_info.lock().unwrap();
+    let pack_path_guard = state.current_pack_path.lock();
+    let pack_info_guard = state.current_pack_info.lock();
 
     let path = pack_path_guard.as_ref().ok_or("No pack loaded")?;
     let info = pack_info_guard.as_ref().ok_or("No pack loaded")?;
@@ -523,7 +383,7 @@ pub async fn create_item_model(item_id: String, state: State<'_, AppState>) -> R
 
     // 重新扫描材质包
     let new_pack_info = crate::pack_parser::scan_pack_directory(&path_clone)?;
-    *state.current_pack_info.lock().unwrap() = Some(new_pack_info);
+    *state.current_pack_info.lock() = Some(new_pack_info);
 
     Ok(())
 }
@@ -534,7 +394,7 @@ pub async fn create_block_model(
     block_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let pack_path_guard = state.current_pack_path.lock().unwrap();
+    let pack_path_guard = state.current_pack_path.lock();
     let path = pack_path_guard.as_ref().ok_or("No pack loaded")?.clone();
     drop(pack_path_guard);
 
@@ -542,7 +402,7 @@ pub async fn create_block_model(
 
     // 重新扫描材质包
     let pack_info = crate::pack_parser::scan_pack_directory(&path)?;
-    *state.current_pack_info.lock().unwrap() = Some(pack_info);
+    *state.current_pack_info.lock() = Some(pack_info);
 
     Ok(())
 }
@@ -553,8 +413,8 @@ pub async fn create_multiple_item_models(
     item_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let pack_path_guard = state.current_pack_path.lock().unwrap();
-    let pack_info_guard = state.current_pack_info.lock().unwrap();
+    let pack_path_guard = state.current_pack_path.lock();
+    let pack_info_guard = state.current_pack_info.lock();
 
     let path = pack_path_guard.as_ref().ok_or("No pack loaded")?;
     let info = pack_info_guard.as_ref().ok_or("No pack loaded")?;
@@ -569,7 +429,7 @@ pub async fn create_multiple_item_models(
 
     // 重新扫描材质包
     let new_pack_info = crate::pack_parser::scan_pack_directory(&path_clone)?;
-    *state.current_pack_info.lock().unwrap() = Some(new_pack_info);
+    *state.current_pack_info.lock() = Some(new_pack_info);
 
     Ok(created)
 }
@@ -579,7 +439,7 @@ pub async fn create_multiple_block_models(
     block_ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let pack_path_guard = state.current_pack_path.lock().unwrap();
+    let pack_path_guard = state.current_pack_path.lock();
     let path = pack_path_guard.as_ref().ok_or("No pack loaded")?.clone();
     drop(pack_path_guard);
 
@@ -587,7 +447,7 @@ pub async fn create_multiple_block_models(
 
     // 重新扫描材质包
     let pack_info = crate::pack_parser::scan_pack_directory(&path)?;
-    *state.current_pack_info.lock().unwrap() = Some(pack_info);
+    *state.current_pack_info.lock() = Some(pack_info);
 
     Ok(created)
 }
@@ -708,33 +568,29 @@ fn read_directory_tree_lazy(
 /// 获取材质包的文件树结构
 #[tauri::command]
 pub async fn get_file_tree(state: State<'_, AppState>) -> Result<FileTreeNode, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let path = get_pack_base_path(&state.current_pack_path)?;
+    
+    let pack_name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
 
-    match pack_path.as_ref() {
-        Some(path) => {
-            let pack_name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+    // 锁已释放，安全执行目录遍历
+    let children = read_directory_tree_lazy(&path, &path, 0, 2)?;
 
-            let children = read_directory_tree_lazy(path, path, 0, 2)?;
+    let file_count = std::fs::read_dir(&path)
+        .map(|entries| entries.count())
+        .unwrap_or(0);
 
-            let file_count = std::fs::read_dir(path)
-                .map(|entries| entries.count())
-                .unwrap_or(0);
-
-            Ok(FileTreeNode {
-                name: pack_name,
-                path: String::new(),
-                is_dir: true,
-                children: Some(children),
-                file_count: Some(file_count),
-                loaded: true,
-            })
-        }
-        None => Err("No pack loaded".to_string()),
-    }
+    Ok(FileTreeNode {
+        name: pack_name,
+        path: String::new(),
+        is_dir: true,
+        children: Some(children),
+        file_count: Some(file_count),
+        loaded: true,
+    })
 }
 
 /// 懒加载指定文件夹的子节点
@@ -743,20 +599,15 @@ pub async fn load_folder_children(
     folder_path: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<FileTreeNode>, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let base_path = get_pack_base_path(&state.current_pack_path)?;
+    
+    let full_path = if folder_path.is_empty() {
+        base_path.clone()
+    } else {
+        base_path.join(&folder_path)
+    };
 
-    match pack_path.as_ref() {
-        Some(base_path) => {
-            let full_path = if folder_path.is_empty() {
-                base_path.clone()
-            } else {
-                base_path.join(&folder_path)
-            };
-
-            read_directory_tree_lazy(&full_path, base_path, 0, 1)
-        }
-        None => Err("No pack loaded".to_string()),
-    }
+    read_directory_tree_lazy(&full_path, &base_path, 0, 1)
 }
 
 /// 创建透明PNG图片
@@ -767,24 +618,8 @@ pub async fn create_transparent_png(
     height: u32,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&file_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
-
+    let full_path = resolve_pack_path(&file_path, &state.current_pack_path)?;
     crate::image_handler::create_transparent_png(&full_path, width, height)?;
-
     Ok(())
 }
 
@@ -797,35 +632,24 @@ pub async fn save_image(
 ) -> Result<(), String> {
     use base64::{engine::general_purpose, Engine as _};
 
-    let pack_path = state.current_pack_path.lock().unwrap();
-
-    let full_path = match pack_path.as_ref() {
-        Some(base_path) => {
-            let path = Path::new(&image_path);
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                base_path.join(path)
-            }
-        }
-        None => {
-            return Err("No pack loaded".to_string());
-        }
-    };
+    let full_path = resolve_pack_path(&image_path, &state.current_pack_path)?;
 
     // 解码base64数据
     let image_data = general_purpose::STANDARD
         .decode(&base64_data)
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
-    // 确保父目录存在
+    // 确保父目录存在（使用 tokio::fs）
     if let Some(parent) = full_path.parent() {
-        std::fs::create_dir_all(parent)
+        tokio::fs::create_dir_all(parent)
+            .await
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
     // 写入文件
-    std::fs::write(&full_path, image_data).map_err(|e| format!("Failed to save image: {}", e))?;
+    tokio::fs::write(&full_path, image_data)
+        .await
+        .map_err(|e| format!("Failed to save image: {}", e))?;
 
     Ok(())
 }
@@ -947,7 +771,7 @@ pub async fn preload_folder_images(
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
     let (base_path, full_path) = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
 
         let base_path = match pack_path.as_ref() {
             Some(path) => path.clone(),
@@ -985,7 +809,7 @@ pub async fn preload_folder_aggressive(
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
     let (base_path, full_path) = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
 
         let base_path = match pack_path.as_ref() {
             Some(path) => path.clone(),
@@ -1095,6 +919,42 @@ pub async fn open_logs_folder() -> Result<(), String> {
     Ok(())
 }
 
+/// 打开指定文件夹
+#[tauri::command]
+pub async fn open_folder(folder_path: String) -> Result<(), String> {
+    let path = Path::new(&folder_path);
+
+    if !path.exists() {
+        return Err(format!("文件夹不存在: {}", folder_path));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    Ok(())
+}
+
 /// 写入日志到文件
 #[allow(dead_code)]
 pub async fn write_log(level: &str, message: &str) {
@@ -1137,7 +997,7 @@ pub async fn write_log(level: &str, message: &str) {
 pub async fn load_language_map(state: State<'_, AppState>) -> Result<std::collections::HashMap<String, String>, String> {
     // 先获取路径，然后立即释放锁
     let map_file = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
         
         match pack_path.as_ref() {
             Some(path) => path.join(".little100").join("map.json"),
@@ -1280,7 +1140,7 @@ pub async fn search_files(
     use_regex: bool,
     state: State<'_, AppState>,
 ) -> Result<SearchResponse, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let pack_path = state.current_pack_path.lock();
     
     let base_path = match pack_path.as_ref() {
         Some(path) => path.clone(),
@@ -1434,8 +1294,8 @@ fn check_chinese_match(
         return None;
     }
     
-    // 只在查询包含中文时才进行映射搜索
-    if !query.chars().any(|c| (c as u32) > 0x4E00 && (c as u32) < 0x9FA5) {
+    // 只在查询包含 CJK 字符时才进行映射搜索
+    if !query.chars().any(constants::is_cjk_char) {
         return None;
     }
     
@@ -1582,14 +1442,17 @@ fn search_in_file(
     if let Some(ext) = file_path.extension() {
         let ext_str = ext.to_string_lossy().to_lowercase();
         if matches!(ext_str.as_str(), "json" | "mcmeta" | "txt" | "lang") {
-            // 读取文件内容限制大小为 10MB
+            // 读取文件内容限制大小
             let metadata = std::fs::metadata(file_path).ok();
             if let Some(meta) = metadata {
-                if meta.len() > 10 * 1024 * 1024 {
+                if meta.len() > constants::SEARCH_MAX_FILE_SIZE {
                     // 文件过大跳过内容搜索
                     return Ok(results);
                 }
             }
+            
+            // 预计算小写查询字符串，避免在循环中重复调用
+            let query_lower = if !case_sensitive { query.to_lowercase() } else { String::new() };
             
             if let Ok(content) = std::fs::read_to_string(file_path) {
                 for (line_num, line) in content.lines().enumerate() {
@@ -1603,7 +1466,7 @@ fn search_in_file(
                         if case_sensitive {
                             line.contains(query)
                         } else {
-                            line.to_lowercase().contains(&query.to_lowercase())
+                            line.to_lowercase().contains(&query_lower)
                         }
                     };
                     
@@ -1665,7 +1528,7 @@ pub async fn download_minecraft_sounds(
     use std::sync::Arc;
     
     let output_dir = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
         match pack_path.as_ref() {
             Some(path) => path.clone(),
             None => return Err("没有加载材质包".to_string()),
@@ -1809,7 +1672,19 @@ pub async fn convert_pack_version(
 
 /// 获取URL内容
 #[tauri::command]
-pub async fn fetch_url(url: String) -> Result<String, String> {
+pub async fn fetch_url(url: String) -> Result<serde_json::Value, String> {
+    let parsed = reqwest::Url::parse(&url)
+        .map_err(|e| format!("Invalid URL: {}", e))?;
+    
+    let host = parsed.host_str()
+        .ok_or_else(|| "URL has no host".to_string())?;
+    
+    if constants::is_blocked_host(host) {
+        return Err(format!("Access denied: blocked host '{}'", host));
+    }
+    
+    let is_trusted = constants::is_trusted_domain(host);
+    
     let response = reqwest::get(&url)
         .await
         .map_err(|e| format!("Failed to fetch URL: {}", e))?;
@@ -1818,10 +1693,16 @@ pub async fn fetch_url(url: String) -> Result<String, String> {
         return Err(format!("HTTP error! status: {}", response.status()));
     }
     
-    response
+    let body = response
         .text()
         .await
-        .map_err(|e| format!("Failed to read response: {}", e))
+        .map_err(|e| format!("Failed to read response: {}", e))?;
+
+    Ok(serde_json::json!({
+        "body": body,
+        "trusted": is_trusted,
+        "host": host,
+    }))
 }
 
 /// 检查文件是否存在
@@ -1839,7 +1720,7 @@ pub async fn copy_sound_file(
 ) -> Result<(), String> {
     // 获取路径
     let base_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
         match pack_path.as_ref() {
             Some(path) => path.clone(),
             None => return Err("No pack loaded".to_string()),
@@ -1878,7 +1759,7 @@ pub async fn copy_sound_file(
 /// 检查临时文件夹中的音频文件
 #[tauri::command]
 pub async fn check_temp_audio_files(state: State<'_, AppState>) -> Result<Vec<String>, String> {
-    let pack_path = state.current_pack_path.lock().unwrap();
+    let pack_path = state.current_pack_path.lock();
     
     let base_path = match pack_path.as_ref() {
         Some(path) => path.clone(),
@@ -1935,7 +1816,7 @@ pub async fn open_in_explorer(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let full_path = {
-        let pack_path = state.current_pack_path.lock().unwrap();
+        let pack_path = state.current_pack_path.lock();
         
         match pack_path.as_ref() {
             Some(base_path) => {
@@ -2003,6 +1884,75 @@ pub async fn open_in_explorer(
                 .map_err(|e| format!("无法打开文件管理器: {}", e))?;
         }
     }
-    
+
     Ok(())
+}
+
+/// 读取融合来源中单个文件
+#[tauri::command]
+pub async fn read_merge_source_file_base64(
+    source_path: String,
+    source_type: PackSourceType,
+    relative_path: String,
+) -> Result<String, String> {
+    use base64::{Engine as _, engine::general_purpose};
+    let bytes = tokio::task::spawn_blocking(move || {
+        crate::pack_merger::read_merge_source_file_bytes(&source_path, &source_type, &relative_path)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(general_purpose::STANDARD.encode(&bytes))
+}
+
+/// 预览融合/分析冲突
+#[tauri::command]
+pub async fn preview_pack_merge(
+    sources: Vec<MergeSourceInput>,
+) -> Result<MergePreview, String> {
+    preview_merge(sources)
+}
+
+/// 执行融合
+#[tauri::command]
+pub async fn execute_pack_merge(
+    app_handle: tauri::AppHandle,
+    sources: Vec<MergeSourceInput>,
+    config: MergeConfig,
+) -> Result<MergeResult, String> {
+    execute_merge_async(app_handle, sources, config).await
+}
+
+/// 获取pack.mcmeta
+#[tauri::command]
+pub async fn get_pack_meta_from_source(
+    path: String,
+    source_type: PackSourceType,
+) -> Result<serde_json::Value, String> {
+    use std::fs;
+    use crate::zip_handler::extract_zip;
+
+    let path_obj = std::path::Path::new(&path);
+    let mcmeta_content = if source_type == PackSourceType::Zip {
+        let temp_dir = get_temp_extract_dir()
+            .join("merge_temp")
+            .join(uuid::Uuid::new_v4().to_string());
+        extract_zip(path_obj, &temp_dir)
+            .map_err(|e| format!("无法解压: {}", e))?;
+        let mcmeta_path = temp_dir.join("pack.mcmeta");
+        if !mcmeta_path.exists() {
+            return Err("该包不包含 pack.mcmeta".to_string());
+        }
+        fs::read_to_string(&mcmeta_path)
+            .map_err(|e| format!("无法读取 pack.mcmeta: {}", e))?
+    } else {
+        let mcmeta_path = path_obj.join("pack.mcmeta");
+        if !mcmeta_path.exists() {
+            return Err("该包不包含 pack.mcmeta".to_string());
+        }
+        fs::read_to_string(&mcmeta_path)
+            .map_err(|e| format!("无法读取 pack.mcmeta: {}", e))?
+    };
+
+    serde_json::from_str(&mcmeta_content)
+        .map_err(|e| format!("无法解析 pack.mcmeta JSON: {}", e))
 }

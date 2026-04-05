@@ -8,6 +8,10 @@ import "./MonacoEditor.css";
 import SoundCreatorDialog from "./SoundCreatorDialog";
 import AudioHoverPlayer from "./AudioHoverPlayer";
 import { readFileContent, writeFileContent } from "../utils/tauri-api";
+import { Icon, useToast } from '@mpe/ui';
+import { logger } from '../utils/logger';
+import { useThemeDetector } from '../hooks/useThemeDetector';
+import { getLanguageFromPath } from '../utils/shared';
 
 let monacoInitPromise: Promise<Monaco> | null = null;
 const initMonaco = () => {
@@ -35,35 +39,6 @@ interface AudioHover {
   position: { x: number; y: number };
 }
 
-function getLanguageFromPath(filePath: string): string {
-  const ext = filePath.toLowerCase().split('.').pop();
-  switch (ext) {
-    case 'json':
-    case 'mcmeta':
-      return 'json';
-    case 'js':
-      return 'javascript';
-    case 'ts':
-      return 'typescript';
-    case 'html':
-      return 'html';
-    case 'css':
-      return 'css';
-    case 'md':
-      return 'markdown';
-    case 'xml':
-      return 'xml';
-    case 'yaml':
-    case 'yml':
-      return 'yaml';
-    case 'properties':
-    case 'lang':
-      return 'ini';
-    default:
-      return 'plaintext';
-  }
-}
-
 export default function TextEditor({ 
   content, 
   filePath, 
@@ -74,6 +49,7 @@ export default function TextEditor({
   onDownloadSounds, 
   onRefreshFileTree 
 }: TextEditorProps) {
+  const toast = useToast();
   const [text, setText] = useState(content);
   const [isDirty, setIsDirty] = useState(false);
   const [history, setHistory] = useState<string[]>([content]);
@@ -91,9 +67,13 @@ export default function TextEditor({
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const originalContent = useRef(content);
   const decorationsRef = useRef<editor.IEditorDecorationsCollection | null>(null);
+  // F-BUG-05: 使用 ref 跟踪最新的处理函数，避免 addCommand 闭包捕获过期值
+  const handleSaveRef = useRef<() => void>(() => {});
+  const handleUndoRef = useRef<() => void>(() => {});
+  const handleRedoRef = useRef<() => void>(() => {});
 
   const isSoundsJson = filePath.includes('sounds.json');
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const isDark = useThemeDetector() === 'dark';
   const language = getLanguageFromPath(filePath);
 
   useEffect(() => {
@@ -127,16 +107,7 @@ export default function TextEditor({
   }, [filePath]);
 
   // 监听主题
-  useEffect(() => {
-    const observer = new MutationObserver(() => {});
-
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme']
-    });
-
-    return () => observer.disconnect();
-  }, []);
+  // F-BUG-09: 移除空的 MutationObserver，使用 useThemeDetector hook 替代
 
   // 处理Ctrl+滚轮缩放
   useEffect(() => {
@@ -198,19 +169,19 @@ export default function TextEditor({
     }, 0);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      handleSave();
+      handleSaveRef.current();
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, () => {
-      handleUndo();
+      handleUndoRef.current();
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, () => {
-      handleRedo();
+      handleRedoRef.current();
     });
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, () => {
-      handleRedo();
+      handleRedoRef.current();
     });
 
     // 跳转到指定行
@@ -277,7 +248,7 @@ export default function TextEditor({
         maxCount
       });
     } catch (error) {
-      console.error('保存历史记录失败:', error);
+      logger.error('保存历史记录失败:', error);
     }
   };
 
@@ -291,7 +262,7 @@ export default function TextEditor({
       });
       setPersistedHistory(entries);
     } catch (error) {
-      console.error('加载历史记录失败:', error);
+      logger.error('加载历史记录失败:', error);
     }
   };
 
@@ -330,8 +301,8 @@ export default function TextEditor({
       });
       await loadHistoryFromBackend();
     } catch (error) {
-      console.error('删除历史记录失败:', error);
-      alert('删除失败');
+      logger.error('删除历史记录失败:', error);
+      toast({ message: '删除失败', type: 'error' });
     }
   };
 
@@ -348,8 +319,8 @@ export default function TextEditor({
 
         await saveHistoryToBackend();
       } catch (error) {
-        console.error('保存文件失败:', error);
-        alert(`保存文件失败: ${error}`);
+        logger.error('保存文件失败:', error);
+        toast({ message: `保存文件失败: ${error}`, type: 'error' });
       }
     }
   };
@@ -404,6 +375,11 @@ export default function TextEditor({
     }
   };
 
+  // F-BUG-05: 同步 ref 到最新处理函数
+  handleSaveRef.current = handleSave;
+  handleUndoRef.current = handleUndo;
+  handleRedoRef.current = handleRedo;
+
   // 格式化JSON
   const formatJSON = () => {
     if (language !== 'json') return;
@@ -427,7 +403,7 @@ export default function TextEditor({
         onChange(formatted);
       }
     } catch (err) {
-      alert('JSON格式错误，无法格式化');
+      toast({ message: 'JSON格式错误，无法格式化', type: 'error' });
     }
   };
 
@@ -499,10 +475,7 @@ export default function TextEditor({
             disabled={historyIndex === 0}
             title="撤销 (Ctrl+Z)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 7v6h6" />
-              <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
-            </svg>
+            <Icon name="undo" size={16} />
           </button>
           <button
             className="editor-btn"
@@ -510,20 +483,14 @@ export default function TextEditor({
             disabled={historyIndex === history.length - 1}
             title="重做 (Ctrl+Y)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 7v6h-6" />
-              <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7" />
-            </svg>
+            <Icon name="redo" size={16} />
           </button>
           <button
             className="editor-btn"
             onClick={showHistoryDialog}
             title="历史记录"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
+            <Icon name="clock" size={16} />
           </button>
           {language === 'json' && (
             <button
@@ -531,11 +498,7 @@ export default function TextEditor({
               onClick={formatJSON}
               title="格式化JSON"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="4 7 4 4 20 4 20 7"></polyline>
-                <line x1="9" y1="20" x2="15" y2="20"></line>
-                <line x1="12" y1="4" x2="12" y2="20"></line>
-              </svg>
+              <Icon name="type" size={16} />
             </button>
           )}
           {isSoundsJson && onDownloadSounds && (
@@ -544,11 +507,7 @@ export default function TextEditor({
               onClick={onDownloadSounds}
               title="下载声音资源"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
+              <Icon name="download" size={16} />
             </button>
           )}
           {isSoundsJson && (
@@ -557,9 +516,7 @@ export default function TextEditor({
               onClick={() => setShowSoundCreator(true)}
               title="创建音效"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M13 7h-2v4H7v2h4v4h2v-4h4v-2h-4V7zm-1-5C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"></path>
-              </svg>
+              <Icon name="plus-circle" size={16} />
             </button>
           )}
           <button
@@ -567,9 +524,7 @@ export default function TextEditor({
             onClick={() => setWordWrap(!wordWrap)}
             title={wordWrap ? "关闭自动换行" : "开启自动换行"}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 6h18M3 12h15a3 3 0 1 1 0 6h-4l2-2m-2 2l2 2M3 18h7" />
-            </svg>
+            <Icon name="word-wrap" size={16} />
           </button>
           <button
             className="editor-btn save-btn"
@@ -577,11 +532,7 @@ export default function TextEditor({
             disabled={!isDirty}
             title="保存 (Ctrl+S)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-              <polyline points="17 21 17 13 7 13 7 21" />
-              <polyline points="7 3 7 8 15 8" />
-            </svg>
+            <Icon name="save" size={16} />
           </button>
           {readOnly && <span className="readonly-badge">只读</span>}
         </div>
@@ -668,10 +619,7 @@ export default function TextEditor({
             <div className="dialog-header">
               <h3>历史记录</h3>
               <button className="dialog-close" onClick={() => setShowHistoryList(false)}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <Icon name="close" size={16} />
               </button>
             </div>
             <div className="dialog-content">
@@ -702,10 +650,7 @@ export default function TextEditor({
                             onClick={() => deleteHistoryEntry(entry)}
                             title="删除此历史记录"
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
+                            <Icon name="delete" size={14} />
                           </button>
                         </div>
                       </div>
@@ -732,7 +677,7 @@ export default function TextEditor({
           <SoundCreatorDialog
             onClose={() => setShowSoundCreator(false)}
             onSave={async (data) => {
-              console.log('保存音效数据:', data);
+              logger.debug('保存音效数据:', data);
               setShowSoundCreator(false);
               
               try {
@@ -750,7 +695,7 @@ export default function TextEditor({
                   onChange(newContent);
                 }
               } catch (error) {
-                console.error('重新加载文件失败:', error);
+                logger.error('重新加载文件失败:', error);
               }
               
               if (onRefreshFileTree) {

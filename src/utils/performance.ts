@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
@@ -22,14 +24,27 @@ export function throttle<T extends (...args: any[]) => any>(
   limit: number
 ): (...args: Parameters<T>) => void {
   let inThrottle: boolean = false;
+  let lastArgs: Parameters<T> | null = null;
+  let trailingTimeout: ReturnType<typeof setTimeout> | null = null;
   
   return function executedFunction(...args: Parameters<T>) {
     if (!inThrottle) {
       func(...args);
       inThrottle = true;
-      setTimeout(() => {
+      lastArgs = null;
+      trailingTimeout = setTimeout(() => {
         inThrottle = false;
+        if (lastArgs) {
+          func(...lastArgs);
+          lastArgs = null;
+          inThrottle = true;
+          trailingTimeout = setTimeout(() => {
+            inThrottle = false;
+          }, limit);
+        }
       }, limit);
+    } else {
+      lastArgs = args;
     }
   };
 }
@@ -86,13 +101,13 @@ export class PerformanceMonitor {
   measure(name: string, startMark: string, endMark?: string): number {
     const start = this.marks.get(startMark);
     if (!start) {
-      console.warn(`Start mark "${startMark}" not found`);
+      logger.warn(`Start mark "${startMark}" not found`);
       return 0;
     }
     
     const end = endMark ? this.marks.get(endMark) : performance.now();
     if (endMark && !end) {
-      console.warn(`End mark "${endMark}" not found`);
+      logger.warn(`End mark "${endMark}" not found`);
       return 0;
     }
     
@@ -127,11 +142,11 @@ export class PerformanceMonitor {
   }
   
   report(): void {
-    console.group('📊 性能报告');
+    console.group('性能报告');
     
     this.measures.forEach((duration, name) => {
-      const color = duration < 100 ? '🟢' : duration < 500 ? '🟡' : '🔴';
-      console.log(`${color} ${name}: ${duration.toFixed(2)}ms`);
+      const color = duration < 100 ? 'Low' : duration < 500 ? 'Medium' : 'Fuckyou';
+      logger.debug(`${color} ${name}: ${duration.toFixed(2)}ms`);
     });
     
     console.groupEnd();

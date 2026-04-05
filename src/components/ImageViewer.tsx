@@ -9,6 +9,8 @@ import {
   checkGPUSupport,
   getGPUInfo,
 } from "../utils/gpu-canvas";
+import { Icon, useToast } from '@mpe/ui';
+import { logger } from '../utils/logger';
 
 interface ImageViewerProps {
   imagePath: string;
@@ -35,6 +37,7 @@ export default function ImageViewer({
   onSaveCanvasData,
   onImageLoad
 }: ImageViewerProps) {
+  const toast = useToast();
   const [zoom, setZoom] = useState(100);
   const [error, setError] = useState(false);
   const [imageSrc, setImageSrc] = useState<string>("");
@@ -65,7 +68,8 @@ export default function ImageViewer({
   
   const [selectionMode, setSelectionMode] = useState<'rectangle' | 'magic-wand' | 'polygon'>('rectangle');
   const [selectionPath, setSelectionPath] = useState<{ x: number; y: number }[]>([]);
-  const [selectionMask, setSelectionMask] = useState<boolean[][] | null>(null);
+  // F-PERF-05: 使用 SelectionMask (Uint8Array) 替代 boolean[][]
+  const [selectionMask, setSelectionMask] = useState<{ data: Uint8Array; width: number; height: number } | null>(null);
   const [isSelectionActive, setIsSelectionActive] = useState(false);
   const [isSelectingRect, setIsSelectingRect] = useState(false);
   const [rectStart, setRectStart] = useState<{ x: number; y: number } | null>(null);
@@ -78,6 +82,7 @@ export default function ImageViewer({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
   const gridCanvasRef = useRef<HTMLCanvasElement>(null);
+  const blobUrlRef = useRef<string | null>(null);  // F-BUG-04: 跟踪 blob URL 以正确清理
 
   const minimapSize = (() => {
     const maxSize = 200;
@@ -151,7 +156,7 @@ export default function ImageViewer({
       
       const gpuSupport = checkGPUSupport();
       gpuInfoRef.current = getGPUInfo();
-      console.log('[GPU加速] 支持情况:', gpuSupport);
+      logger.debug('[GPU加速] 支持情况:', gpuSupport);
       
       canvas.width = img.naturalWidth;
       canvas.height = img.naturalHeight;
@@ -203,7 +208,7 @@ export default function ImageViewer({
 
   useEffect(() => {
     const loadImage = async () => {
-      console.log(`[性能-图片] 开始加载: ${imagePath}`);
+      logger.debug(`[性能-图片] 开始加载: ${imagePath}`);
       const startTime = performance.now();
       
       try {
@@ -217,7 +222,7 @@ export default function ImageViewer({
         
         const cachedImage = imageCache.get(imagePath);
         if (cachedImage) {
-          console.log(`[性能-图片] 从缓存加载`);
+          logger.debug(`[性能-图片] 从缓存加载`);
           setImageSrc(cachedImage);
           const img = new Image();
           img.onload = () => {
@@ -234,6 +239,7 @@ export default function ImageViewer({
         const blob = new Blob([uint8Array], { type: 'image/png' });
         
         const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;  // F-BUG-04: 用 ref 跟踪 blob URL
         setImageSrc(objectUrl);
         
         const img = new Image();
@@ -242,39 +248,40 @@ export default function ImageViewer({
           setImageSize(size);
           if (onImageLoad) onImageLoad(size);
           
-          console.log(`[性能-图片] 加载完成: ${size.width}x${size.height}, 耗时: ${(performance.now() - startTime).toFixed(2)}ms`);
+          logger.debug(`[性能-图片] 加载完成: ${size.width}x${size.height}, 耗时: ${(performance.now() - startTime).toFixed(2)}ms`);
           
           setTimeout(() => {
             const reader = new FileReader();
             reader.onloadend = () => {
               const base64data = reader.result as string;
               imageCache.set(imagePath, base64data);
-              console.log(`[性能-图片] Base64缓存完成`);
+              logger.debug(`[性能-图片] Base64缓存完成`);
             };
             reader.onerror = () => {
-              console.error('[性能-图片] Base64转换失败');
+              logger.error('[性能-图片] Base64转换失败');
             };
             reader.readAsDataURL(blob);
           }, 100);
         };
         img.onerror = () => {
-          console.error('[性能-图片] 图片对象加载失败');
+          logger.error('[性能-图片] 图片对象加载失败');
           setError(true);
         };
         img.src = objectUrl;
         
       } catch (err) {
-        console.error(`[性能-图片] 加载失败`, err);
+        logger.error(`[性能-图片] 加载失败`, err);
         setError(true);
       }
     };
     
     loadImage();
     
-    // 清理
+    // 清理 (F-BUG-04: 使用 ref 避免闭包捕获过期 imageSrc)
     return () => {
-      if (imageSrc && imageSrc.startsWith('blob:')) {
-        URL.revokeObjectURL(imageSrc);
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
       }
     };
   }, [imagePath]);
@@ -409,34 +416,37 @@ export default function ImageViewer({
     const startIndex = (startY * width + startX) * 4;
     const targetColor = { r: data[startIndex], g: data[startIndex + 1], b: data[startIndex + 2], a: data[startIndex + 3] };
     
-    const mask: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
-    const visited: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
+    // F-PERF-05: 使用 Uint8Array 替代 boolean[][]，减少内存开销
+    const mask = new Uint8Array(width * height);
+    const visited = new Uint8Array(width * height);
     
     const isSimilar = (r: number, g: number, b: number, a: number) => {
       return Math.abs(r - targetColor.r) <= tolerance && Math.abs(g - targetColor.g) <= tolerance && Math.abs(b - targetColor.b) <= tolerance && Math.abs(a - targetColor.a) <= tolerance;
     };
     
+    // F-PERF-01: 使用索引指针替代 queue.shift() (O(1) vs O(n))
     const queue: [number, number][] = [[startX, startY]];
-    visited[startY][startX] = true;
+    let queueIndex = 0;
+    visited[startY * width + startX] = 1;
     
-    while (queue.length > 0) {
-      const [cx, cy] = queue.shift()!;
+    while (queueIndex < queue.length) {
+      const [cx, cy] = queue[queueIndex++];
       const index = (cy * width + cx) * 4;
       
       if (isSimilar(data[index], data[index + 1], data[index + 2], data[index + 3])) {
-        mask[cy][cx] = true;
+        mask[cy * width + cx] = 1;
         const directions = [[0, 1], [1, 0], [0, -1], [-1, 0]];
         for (const [dx, dy] of directions) {
           const nx = cx + dx;
           const ny = cy + dy;
-          if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
-            visited[ny][nx] = true;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny * width + nx]) {
+            visited[ny * width + nx] = 1;
             queue.push([nx, ny]);
           }
         }
       }
     }
-    setSelectionMask(mask);
+    setSelectionMask({ data: mask, width, height });
     setIsSelectionActive(true);
   };
   
@@ -456,13 +466,13 @@ export default function ImageViewer({
     const canvas = canvasRef.current;
     const width = canvas.width;
     const height = canvas.height;
-    const mask: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
+    const mask = new Uint8Array(width * height);
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (isPointInPolygon(x, y, polygon)) mask[y][x] = true;
+        if (isPointInPolygon(x, y, polygon)) mask[y * width + x] = 1;
       }
     }
-    setSelectionMask(mask);
+    setSelectionMask({ data: mask, width, height });
     setIsSelectionActive(true);
   };
 
@@ -475,13 +485,13 @@ export default function ImageViewer({
     const startY = Math.max(0, Math.min(Math.floor(Math.min(y1, y2)), height - 1));
     const endX = Math.max(0, Math.min(Math.floor(Math.max(x1, x2)), width - 1));
     const endY = Math.max(0, Math.min(Math.floor(Math.max(y1, y2)), height - 1));
-    const mask: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
+    const mask = new Uint8Array(width * height);
     for (let y = startY; y <= endY; y++) {
       for (let x = startX; x <= endX; x++) {
-        mask[y][x] = true;
+        mask[y * width + x] = 1;
       }
     }
-    setSelectionMask(mask);
+    setSelectionMask({ data: mask, width, height });
     setIsSelectionActive(true);
   };
 
@@ -501,9 +511,10 @@ export default function ImageViewer({
     if (!ctx) return;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
-    for (let y = 0; y < selectionMask.length; y++) {
-      for (let x = 0; x < selectionMask[y].length; x++) {
-        if (selectionMask[y][x]) {
+    const mw = selectionMask.width;
+    for (let y = 0; y < selectionMask.height; y++) {
+      for (let x = 0; x < mw; x++) {
+        if (selectionMask.data[y * mw + x]) {
           const index = (y * canvas.width + x) * 4;
           data[index + 3] = 0;
         }
@@ -521,9 +532,10 @@ export default function ImageViewer({
     if (!ctx) return;
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
-    for (let y = 0; y < selectionMask.length; y++) {
-      for (let x = 0; x < selectionMask[y].length; x++) {
-        if (selectionMask[y][x]) {
+    const mw = selectionMask.width;
+    for (let y = 0; y < selectionMask.height; y++) {
+      for (let x = 0; x < mw; x++) {
+        if (selectionMask.data[y * mw + x]) {
           const index = (y * canvas.width + x) * 4;
           data[index] = color.r;
           data[index + 1] = color.g;
@@ -560,7 +572,7 @@ export default function ImageViewer({
       const dataUrl = drawingCanvasRef.current.toDataURL('image/png');
       await invoke('save_file_history', { packDir, filePath: imagePath, content: dataUrl, fileType: 'image', maxCount });
     } catch (error) {
-      console.error('保存历史记录失败:', error);
+      logger.error('保存历史记录失败:', error);
     }
   };
 
@@ -570,7 +582,7 @@ export default function ImageViewer({
       const entries = await invoke<any[]>('load_file_history', { packDir, filePath: imagePath });
       setPersistedHistory(entries);
     } catch (error) {
-      console.error('加载历史记录失败:', error);
+      logger.error('加载历史记录失败:', error);
     }
   };
 
@@ -595,8 +607,8 @@ export default function ImageViewer({
       img.src = entry.content;
       setShowHistoryList(false);
     } catch (error) {
-      console.error('恢复历史记录失败:', error);
-      alert('恢复失败');
+      logger.error('恢复历史记录失败:', error);
+      toast({ message: '恢复失败', type: 'error' });
     }
   };
 
@@ -679,13 +691,16 @@ export default function ImageViewer({
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 2]);
       ctx.lineDashOffset = -Date.now() / 100;
-      for (let y = 0; y < selectionMask.length; y++) {
-        for (let x = 0; x < selectionMask[y].length; x++) {
-          if (selectionMask[y][x]) {
-             if (x === 0 || !selectionMask[y][x - 1]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 1); ctx.stroke(); }
-             if (x === selectionMask[y].length - 1 || !selectionMask[y][x + 1]) { ctx.beginPath(); ctx.moveTo(x + 1, y); ctx.lineTo(x + 1, y + 1); ctx.stroke(); }
-             if (y === 0 || !selectionMask[y - 1][x]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 1, y); ctx.stroke(); }
-             if (y === selectionMask.length - 1 || !selectionMask[y + 1][x]) { ctx.beginPath(); ctx.moveTo(x, y + 1); ctx.lineTo(x + 1, y + 1); ctx.stroke(); }
+      const mw = selectionMask.width;
+      const mh = selectionMask.height;
+      const md = selectionMask.data;
+      for (let y = 0; y < mh; y++) {
+        for (let x = 0; x < mw; x++) {
+          if (md[y * mw + x]) {
+             if (x === 0 || !md[y * mw + x - 1]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + 1); ctx.stroke(); }
+             if (x === mw - 1 || !md[y * mw + x + 1]) { ctx.beginPath(); ctx.moveTo(x + 1, y); ctx.lineTo(x + 1, y + 1); ctx.stroke(); }
+             if (y === 0 || !md[(y - 1) * mw + x]) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 1, y); ctx.stroke(); }
+             if (y === mh - 1 || !md[(y + 1) * mw + x]) { ctx.beginPath(); ctx.moveTo(x, y + 1); ctx.lineTo(x + 1, y + 1); ctx.stroke(); }
           }
         }
       }
@@ -769,9 +784,9 @@ export default function ImageViewer({
     for (const op of ops) {
       // 选区检查
       const canDraw = !selectionMask ||
-        (op.y >= 0 && op.y < selectionMask.length &&
-         op.x >= 0 && op.x < selectionMask[0].length &&
-         selectionMask[Math.floor(op.y)][Math.floor(op.x)]);
+        (op.y >= 0 && op.y < selectionMask.height &&
+         op.x >= 0 && op.x < selectionMask.width &&
+         selectionMask.data[Math.floor(op.y) * selectionMask.width + Math.floor(op.x)] !== 0);
       
       if (canDraw) {
         if (op.tool === 'brush') {
@@ -933,9 +948,9 @@ export default function ImageViewer({
               await invoke('save_image', { imagePath: imagePath, base64Data: base64Data });
               await saveHistoryToBackend();
               setHasChanges(false);
-              alert('保存成功!');
+              toast({ message: '保存成功!', type: 'success' });
           }
-      } catch (err) { console.error('保存失败:', err); alert(`保存失败: ${err}`); }
+      } catch (err) { logger.error('保存失败:', err); toast({ message: `保存失败: ${err}`, type: 'error' }); }
   };
   
   useEffect(() => {
@@ -1070,31 +1085,31 @@ export default function ImageViewer({
         <div className="image-controls">
            {/* ... Controls (Zoom, Undo, Redo, Save) ... same as before */}
           <button className="zoom-btn" onClick={undo} disabled={historyIndex <= 0} title="撤销 (Ctrl+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 7v6h6"></path><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"></path></svg>
+            <Icon name="undo" size={16} />
           </button>
           <button className="zoom-btn" onClick={redo} disabled={historyIndex >= history.length - 1} title="重做 (Ctrl+Shift+Z)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 7v6h-6"></path><path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"></path></svg>
+            <Icon name="redo" size={16} />
           </button>
           <button className="zoom-btn" onClick={showHistoryDialog} title="历史记录">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <Icon name="clock" size={16} />
           </button>
           {hasChanges && (
             <button className="save-btn" onClick={handleSave} title="保存更改 (Ctrl+S)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> 保存
+              <Icon name="save" size={16} /> 保存
             </button>
           )}
           <button className="zoom-btn" onClick={handleZoomOut} title="缩小">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="8" y1="11" x2="14" y2="11"></line><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <Icon name="zoom-out" size={16} />
           </button>
           <span className="zoom-level">{zoom}%</span>
           <button className="zoom-btn" onClick={handleZoomIn} title="放大">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"></circle><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <Icon name="zoom-in" size={16} />
           </button>
           <button className="zoom-btn" onClick={handleReset} title="重置">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 4v6h6"></path><path d="M23 20v-6h-6"></path><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path></svg>
+            <Icon name="reset" size={16} />
           </button>
           <button className={`minimap-toggle ${showMinimap ? 'active' : ''}`} onClick={() => showMinimap ? handleMinimapClose(true) : (setIsMinimapManuallyHidden(false), setShowMinimap(true))} title={showMinimap ? "隐藏鸟瞰图" : "显示鸟瞰图"}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><rect x="7" y="7" width="3" height="3"></rect></svg>
+            <Icon name="pixel-grid" size={16} />
           </button>
         </div>
       </div>
@@ -1126,10 +1141,10 @@ export default function ImageViewer({
         {showMinimap && imageSize.width > 0 && (
           <div className={`minimap-container ${isDraggingMinimap ? 'dragging' : ''} ${isMinimapClosing ? 'closing' : ''}`} style={{ right: `${minimapPosition.x}px`, bottom: `${minimapPosition.y}px`, opacity: isDraggingMinimap ? 0.8 : 0.85, backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)' }} onMouseDown={(e) => e.stopPropagation()} onMouseEnter={() => setIsMinimapHovered(true)} onMouseLeave={() => setIsMinimapHovered(false)}>
              <div className={`minimap-controls ${isMinimapHovered ? 'visible' : ''}`}>
-               <button className="minimap-control-btn minimap-reset-btn" onClick={(e) => { e.stopPropagation(); e.preventDefault(); resetMinimapPosition(); }} title="重置位置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M3 21v-5h5"></path></svg></button>
-               <button className="minimap-control-btn minimap-close-btn" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleMinimapClose(); }} title="关闭鸟瞰图"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+               <button className="minimap-control-btn minimap-reset-btn" onClick={(e) => { e.stopPropagation(); e.preventDefault(); resetMinimapPosition(); }} title="重置位置"><Icon name="reset" size={14} /></button>
+               <button className="minimap-control-btn minimap-close-btn" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleMinimapClose(); }} title="关闭鸟瞰图"><Icon name="close" size={14} /></button>
              </div>
-             <div className="minimap-drag-handle" onMouseDown={handleMinimapMouseDown} title="拖动鸟瞰图"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="9" r="1"></circle><circle cx="9" cy="15" r="1"></circle><circle cx="15" cy="9" r="1"></circle><circle cx="15" cy="15" r="1"></circle></svg></div>
+             <div className="minimap-drag-handle" onMouseDown={handleMinimapMouseDown} title="拖动鸟瞰图"><Icon name="drag-handle" size={16} /></div>
              <canvas ref={minimapCanvasRef} className="minimap-canvas" />
              {(() => {
                 if (!contentRef.current || minimapSize.width === 0) return null;
@@ -1158,7 +1173,7 @@ export default function ImageViewer({
 
         {error ? (
           <div className="image-error">
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            <Icon name="report-issue" size={32} />
             <p>无法加载图片</p>
             <span className="error-path">{imagePath}</span>
           </div>
@@ -1243,7 +1258,7 @@ export default function ImageViewer({
           <div className="history-list-dialog">
             <div className="dialog-header">
               <h3>历史记录</h3>
-              <button className="dialog-close" onClick={() => setShowHistoryList(false)}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+              <button className="dialog-close" onClick={() => setShowHistoryList(false)}><Icon name="close" size={16} /></button>
             </div>
             <div className="dialog-content">
               {persistedHistory.length === 0 ? (

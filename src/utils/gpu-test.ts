@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 export function testCanvasGPUAcceleration(canvas: HTMLCanvasElement): {
   isAccelerated: boolean;
   method: string;
@@ -82,7 +84,7 @@ export function testCanvasGPUAcceleration(canvas: HTMLCanvasElement): {
 
 export async function benchmarkCanvasPerformance(
   canvas: HTMLCanvasElement,
-  operations: number = 10000
+  operations: number = 1000
 ): Promise<{
   fps: number;
   avgFrameTime: number;
@@ -130,7 +132,7 @@ export async function benchmarkCanvasPerformance(
 export async function compareRenderingMethods(
   width: number = 1000,
   height: number = 1000,
-  operations: number = 5000
+  operations: number = 1000
 ): Promise<{
   cpu: any;
   gpu: any;
@@ -141,7 +143,7 @@ export async function compareRenderingMethods(
   cpuCanvas.height = height;
   const cpuResult = await benchmarkCanvasPerformance(cpuCanvas, operations);
 
-  // 测试
+  // CSS styles have no effect on a detached (not-in-DOM) canvas.
   const gpuCanvas = document.createElement('canvas');
   gpuCanvas.width = width;
   gpuCanvas.height = height;
@@ -208,7 +210,7 @@ export class GPUMonitor {
           callback(this.fps);
         }
 
-        console.log(`[GPU监控] FPS: ${this.fps}, Canvas: ${this.canvas.width}x${this.canvas.height}`);
+        logger.debug(`[GPU监控] FPS: ${this.fps}, Canvas: ${this.canvas.width}x${this.canvas.height}`);
       }
 
       this.animationId = requestAnimationFrame(monitor);

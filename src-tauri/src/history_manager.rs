@@ -32,10 +32,17 @@ fn get_history_dir(pack_dir: &Path) -> PathBuf {
 }
 
 // 获取文件的历史记录目录
-fn get_file_history_dir(pack_dir: &Path, file_path: &str) -> PathBuf {
+fn get_file_history_dir(pack_dir: &Path, file_path: &str) -> Result<PathBuf, String> {
     let history_dir = get_history_dir(pack_dir);
     let file_history_path = history_dir.join(file_path);
-    file_history_path
+    let canonical_history = crate::path_security::normalize_path_public(&history_dir);
+    let canonical_target = crate::path_security::normalize_path_public(&file_history_path);
+    
+    if !canonical_target.starts_with(&canonical_history) {
+        return Err(format!("Access denied: path '{}' is outside history directory", file_path));
+    }
+    
+    Ok(file_history_path)
 }
 
 // 保存文件历史记录
@@ -48,43 +55,36 @@ pub async fn save_file_history(
     max_count: u32,
 ) -> Result<String, String> {
     let pack_path = Path::new(&pack_dir);
-    let file_history_dir = get_file_history_dir(pack_path, &file_path);
+    let file_history_dir = get_file_history_dir(pack_path, &file_path)?;
     
     // 创建历史记录目录
     fs::create_dir_all(&file_history_dir)
         .map_err(|e| format!("创建历史记录目录失败: {}", e))?;
     
-    // 获取现有历史记录数量
-    let entries = fs::read_dir(&file_history_dir)
-        .map_err(|e| format!("读取历史记录目录失败: {}", e))?;
+    let mut files: Vec<_> = fs::read_dir(&file_history_dir)
+        .map_err(|e| format!("读取历史记录目录失败: {}", e))?
+        .filter_map(|e| e.ok())
+        .collect();
     
-    let mut count = entries.count() as u32;
+    files.sort_by_key(|f| f.file_name());
     
-    // 如果超过限制删除最旧的记录
-    if count >= max_count {
-        let mut files: Vec<_> = fs::read_dir(&file_history_dir)
-            .map_err(|e| format!("读取历史记录失败: {}", e))?
-            .filter_map(|e| e.ok())
-            .collect();
-        
-        files.sort_by_key(|f| f.file_name());
-        
+    if files.len() as u32 >= max_count {
         if let Some(oldest) = files.first() {
             fs::remove_file(oldest.path())
                 .map_err(|e| format!("删除旧历史记录失败: {}", e))?;
-            count -= 1;
         }
     }
     
-    // 创建新的历史记录
-    let timestamp = chrono::Utc::now().to_rfc3339();
+    let timestamp = chrono::Utc::now();
+    let timestamp_str = timestamp.to_rfc3339();
+    let file_name = timestamp.format("%Y%m%d_%H%M%S_%3f").to_string();
     let entry = HistoryEntry {
-        timestamp: timestamp.clone(),
+        timestamp: timestamp_str.clone(),
         content,
         file_type,
     };
     
-    let history_file = file_history_dir.join(format!("{:03}.json", count + 1));
+    let history_file = file_history_dir.join(format!("{}.json", file_name));
     let json = serde_json::to_string_pretty(&entry)
         .map_err(|e| format!("序列化历史记录失败: {}", e))?;
     
@@ -92,7 +92,8 @@ pub async fn save_file_history(
         .map_err(|e| format!("写入历史记录失败: {}", e))?;
     
     // 更新元数据
-    update_metadata(pack_path, &file_path, count + 1, &timestamp)?;
+    let count = files.len() as u32;
+    update_metadata(pack_path, &file_path, count + 1, &timestamp_str)?;
     
     Ok("历史记录保存成功".to_string())
 }
@@ -104,7 +105,7 @@ pub async fn load_file_history(
     file_path: String,
 ) -> Result<Vec<HistoryEntry>, String> {
     let pack_path = Path::new(&pack_dir);
-    let file_history_dir = get_file_history_dir(pack_path, &file_path);
+    let file_history_dir = get_file_history_dir(pack_path, &file_path)?;
     
     if !file_history_dir.exists() {
         return Ok(Vec::new());
@@ -160,7 +161,7 @@ pub async fn get_history_stats(pack_dir: String) -> Result<HistoryMetadata, Stri
 #[command]
 pub async fn clear_file_history(pack_dir: String, file_path: String) -> Result<String, String> {
     let pack_path = Path::new(&pack_dir);
-    let file_history_dir = get_file_history_dir(pack_path, &file_path);
+    let file_history_dir = get_file_history_dir(pack_path, &file_path)?;
     
     if file_history_dir.exists() {
         fs::remove_dir_all(&file_history_dir)
@@ -214,7 +215,7 @@ fn update_metadata(
         }
     };
     
-    let file_history_dir = get_file_history_dir(pack_path, file_path);
+    let file_history_dir = get_file_history_dir(pack_path, file_path)?;
     let size = calculate_dir_size(&file_history_dir, false)?;
     
     metadata.files.insert(

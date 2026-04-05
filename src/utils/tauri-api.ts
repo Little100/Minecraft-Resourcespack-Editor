@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { PackInfo, ImageInfo } from "../types/pack";
+import type { PackInfo, ImageInfo, MergePreview, MergeConfig, MergeResult } from "../types/pack";
 
 // 导入材质包
 export async function importPackZip(zipPath: string): Promise<PackInfo> {
@@ -197,6 +197,31 @@ export async function createNewPack(
   });
 }
 
+export async function previewPackMerge(
+  sources: Array<{ path: string; source_type: 'Zip' | 'Folder' }>
+): Promise<MergePreview> {
+  return await invoke<MergePreview>("preview_pack_merge", { sources });
+}
+
+export async function executePackMerge(
+  sources: Array<{ path: string; source_type: 'Zip' | 'Folder' }>,
+  config: MergeConfig
+): Promise<MergeResult> {
+  return await invoke<MergeResult>("execute_pack_merge", { sources, config });
+}
+
+export async function readMergeSourceFileBase64(
+  sourcePath: string,
+  sourceType: "Zip" | "Folder",
+  relativePath: string
+): Promise<string> {
+  return await invoke<string>("read_merge_source_file_base64", {
+    sourcePath,
+    sourceType,
+    relativePath,
+  });
+}
+
 // 为物品创建模型
 export async function createItemModel(itemId: string): Promise<void> {
   return await invoke<void>("create_item_model", { itemId });
@@ -224,6 +249,15 @@ export async function createMultipleBlockModels(
 // 获取系统已安装的字体列表
 export async function getSystemFonts(): Promise<string[]> {
   return await invoke<string[]>("get_system_fonts");
+}
+
+export async function openFolder(folderPath: string): Promise<void> {
+  return await invoke<void>("open_folder", { folderPath });
+}
+
+export function parentDirPath(filePath: string): string {
+  const i = Math.max(filePath.lastIndexOf("\\"), filePath.lastIndexOf("/"));
+  return i > 0 ? filePath.slice(0, i) : filePath;
 }
 
 // 启动 Web 服务器

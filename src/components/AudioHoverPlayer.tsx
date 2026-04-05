@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Icon } from '@mpe/ui';
+import { logger } from '../utils/logger';
 import './AudioHoverPlayer.css';
 
 interface AudioHoverPlayerProps {
@@ -63,7 +65,7 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
           setError('音频文件不存在');
         }
       } catch (err) {
-        console.error('加载音频失败:', err);
+        logger.error('加载音频失败:', err);
         setError('加载失败');
       } finally {
         setIsLoading(false);
@@ -92,7 +94,7 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
       audioRef.current.pause();
     } else {
       audioRef.current.play().catch(err => {
-        console.error('播放失败:', err);
+        logger.error('播放失败:', err);
         setError('播放失败');
       });
     }
@@ -152,11 +154,7 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
     >
       <div className="audio-hover-header">
         <div className="audio-path-display">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 18V5l12-2v13"></path>
-            <circle cx="6" cy="18" r="3"></circle>
-            <circle cx="18" cy="16" r="3"></circle>
-          </svg>
+          <Icon name="music" size={16} />
           <span>{audioPath}</span>
         </div>
         <button className="close-btn" onClick={onClose} title="关闭">
@@ -173,11 +171,7 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
 
       {error && (
         <div className="audio-hover-error" title={error}>
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
+          <Icon name="report-issue" size={32} />
           <span>{error}</span>
         </div>
       )}
@@ -200,14 +194,9 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
               title={isPlaying ? '暂停' : '播放'}
             >
               {isPlaying ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <rect x="6" y="4" width="4" height="16"></rect>
-                  <rect x="14" y="4" width="4" height="16"></rect>
-                </svg>
+                <Icon name="pause" size={20} filled />
               ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                  <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                </svg>
+                <Icon name="play" size={20} filled />
               )}
             </button>
 
@@ -226,10 +215,7 @@ export default function AudioHoverPlayer({ audioPath, position, onClose }: Audio
           </div>
 
           <div className="volume-section">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-            </svg>
+            <Icon name="volume" size={16} />
             <input
               type="range"
               min="0"

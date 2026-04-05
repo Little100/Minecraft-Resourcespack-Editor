@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 interface CacheEntry {
   data: string;
   size: number;
@@ -132,7 +134,13 @@ class ImageCacheManager {
     };
   }
 
-  // 预加载功能
+  // 预加载功能 
+  private loadFn: ((key: string) => Promise<string>) | null = null;
+
+  setLoadFunction(fn: (key: string) => Promise<string>): void {
+    this.loadFn = fn;
+  }
+
   addToPreloadQueue(keys: string[]): void {
     keys.forEach(key => {
       if (!this.cache.has(key)) {
@@ -154,6 +162,16 @@ class ImageCacheManager {
     
     const batch = Array.from(this.preloadQueue).slice(0, 10);
     this.preloadQueue = new Set(Array.from(this.preloadQueue).slice(10));
+
+    if (this.loadFn) {
+      for (const key of batch) {
+        if (this.cache.has(key)) continue;
+        try {
+          const data = await this.loadFn(key);
+          this.set(key, data);
+        } catch {}
+      }
+    }
 
     this.isPreloading = false;
     
@@ -202,15 +220,23 @@ class ImageCacheManager {
     });
 
     if (toRemove.length > 0) {
-      console.log(`[缓存优化] 清理了 ${toRemove.length} 个低价值条目`);
+      logger.debug(`[缓存优化] 清理了 ${toRemove.length} 个低价值条目`);
     }
   }
 }
 
 export const imageCache = new ImageCacheManager();
+let optimizeIntervalId: ReturnType<typeof setInterval> | null = null;
 
 if (typeof window !== 'undefined') {
-  setInterval(() => {
+  optimizeIntervalId = setInterval(() => {
     imageCache.optimize();
   }, 5 * 60 * 1000);
+}
+
+export function stopCacheOptimizer(): void {
+  if (optimizeIntervalId !== null) {
+    clearInterval(optimizeIntervalId);
+    optimizeIntervalId = null;
+  }
 }

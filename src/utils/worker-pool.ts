@@ -1,3 +1,5 @@
+import { logger } from './logger';
+
 interface Task {
   id: string;
   type: string;
@@ -11,7 +13,9 @@ class WorkerPool {
   private availableWorkers: Worker[] = [];
   private taskQueue: Task[] = [];
   private pendingTasks: Map<string, Task> = new Map();
+  private workerTaskMap: Map<Worker, Set<string>> = new Map();
   private workerCount: number;
+  private nextTaskId: number = 0;
 
   constructor(workerCount?: number) {
     const cpuCount = navigator.hardwareConcurrency || 4;
@@ -19,7 +23,7 @@ class WorkerPool {
     
     this.initializeWorkers();
     
-    console.log(`[Worker Pool] 初始化了 ${this.workerCount} 个Worker`);
+    logger.debug(`[Worker Pool] 初始化了 ${this.workerCount} 个Worker`);
   }
 
   private initializeWorkers(): void {
@@ -36,7 +40,7 @@ class WorkerPool {
         this.workers.push(worker);
         this.availableWorkers.push(worker);
       } catch (error) {
-        console.error(`[Worker Pool] 创建Worker ${i} 失败:`, error);
+        logger.error(`[Worker Pool] 创建Worker ${i} 失败:`, error);
       }
     }
   }
@@ -46,11 +50,13 @@ class WorkerPool {
     
     const task = this.pendingTasks.get(id);
     if (!task) {
-      console.warn(`[Worker Pool] 收到未知任务的响应: ${id}`);
+      logger.warn(`[Worker Pool] 收到未知任务的响应: ${id}`);
       return;
     }
     
     this.pendingTasks.delete(id);
+    const workerTasks = this.workerTaskMap.get(worker);
+    if (workerTasks) workerTasks.delete(id);
     this.availableWorkers.push(worker);
     
     if (error) {
@@ -63,12 +69,19 @@ class WorkerPool {
   }
 
   private handleWorkerError(worker: Worker, error: ErrorEvent): void {
-    console.error('[Worker Pool] Worker错误:', error);
+    logger.error('[Worker Pool] Worker错误:', error);
     
-    this.pendingTasks.forEach((task, id) => {
-      task.reject(new Error('Worker错误'));
-      this.pendingTasks.delete(id);
-    });
+    const workerTasks = this.workerTaskMap.get(worker);
+    if (workerTasks) {
+      for (const taskId of workerTasks) {
+        const task = this.pendingTasks.get(taskId);
+        if (task) {
+          task.reject(new Error('Worker错误'));
+          this.pendingTasks.delete(taskId);
+        }
+      }
+      workerTasks.clear();
+    }
     
     const index = this.workers.indexOf(worker);
     if (index > -1) {
@@ -86,7 +99,7 @@ class WorkerPool {
         this.workers[index] = newWorker;
         this.availableWorkers.push(newWorker);
       } catch (err) {
-        console.error('[Worker Pool] 重新创建Worker失败:', err);
+        logger.error('[Worker Pool] 重新创建Worker失败:', err);
       }
     }
   }
@@ -100,18 +113,31 @@ class WorkerPool {
     const worker = this.availableWorkers.shift()!;
     
     this.pendingTasks.set(task.id, task);
+    if (!this.workerTaskMap.has(worker)) {
+      this.workerTaskMap.set(worker, new Set());
+    }
+    this.workerTaskMap.get(worker)!.add(task.id);
     
+    const transfers: Transferable[] = [];
+    if (task.data instanceof ImageData) {
+      transfers.push(task.data.data.buffer);
+    } else if (task.data?.imageData instanceof ImageData) {
+      transfers.push(task.data.imageData.data.buffer);
+    } else if (task.data?.buffer instanceof ArrayBuffer) {
+      transfers.push(task.data.buffer);
+    }
+
     worker.postMessage({
       id: task.id,
       type: task.type,
       data: task.data,
-    });
+    }, transfers);
   }
 
   execute<T = any>(type: string, data: any): Promise<T> {
     return new Promise((resolve, reject) => {
       const task: Task = {
-        id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: `task_${++this.nextTaskId}`,
         type,
         data,
         resolve,
@@ -146,14 +172,27 @@ class WorkerPool {
   }
 }
 
-export const workerPool = new WorkerPool();
+let _workerPool: WorkerPool | null = null;
+
+export function getWorkerPool(): WorkerPool {
+  if (!_workerPool) {
+    _workerPool = new WorkerPool();
+  }
+  return _workerPool;
+}
+
+export const workerPool: WorkerPool = new Proxy({} as WorkerPool, {
+  get(_, prop) {
+    return (getWorkerPool() as any)[prop];
+  },
+});
 
 export const processImageInWorker = (imageData: ImageData) => {
-  return workerPool.execute('process-image', { imageData });
+  return getWorkerPool().execute('process-image', { imageData });
 };
 
 export const calculateHistogramInWorker = (imageData: ImageData) => {
-  return workerPool.execute('calculate-histogram', { imageData });
+  return getWorkerPool().execute('calculate-histogram', { imageData });
 };
 
 export const applyFilterInWorker = (
@@ -161,7 +200,7 @@ export const applyFilterInWorker = (
   filterType: string,
   params: any
 ) => {
-  return workerPool.execute('apply-filter', { imageData, filterType, params });
+  return getWorkerPool().execute('apply-filter', { imageData, filterType, params });
 };
 
 export const resizeInWorker = (
@@ -169,5 +208,5 @@ export const resizeInWorker = (
   width: number,
   height: number
 ) => {
-  return workerPool.execute('resize', { imageData, width, height });
+  return getWorkerPool().execute('resize', { imageData, width, height });
 };

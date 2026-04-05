@@ -7,14 +7,14 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-static THUMBNAIL_CACHE: Lazy<Arc<RwLock<LruCache<String, String>>>> = Lazy::new(|| {
-    Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(1000).unwrap())))
+static THUMBNAIL_CACHE: LazyLock<Arc<RwLock<LruCache<String, String>>>> = LazyLock::new(|| {
+    Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(crate::constants::THUMBNAIL_CACHE_SIZE).unwrap())))
 });
 
-static IMAGE_INFO_CACHE: Lazy<Arc<RwLock<LruCache<String, ImageInfo>>>> = Lazy::new(|| {
-    Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(2000).unwrap())))
+static IMAGE_INFO_CACHE: LazyLock<Arc<RwLock<LruCache<String, ImageInfo>>>> = LazyLock::new(|| {
+    Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(crate::constants::IMAGE_INFO_CACHE_SIZE).unwrap())))
 });
 
 /// 读取图片并转换为base64

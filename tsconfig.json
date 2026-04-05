@@ -16,8 +16,13 @@
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+
+    "paths": {
+      "@mpe/ui": ["./sdk/mpe-ui/src/index.ts"],
+      "@mpe/ui/*": ["./sdk/mpe-ui/src/*"]
+    }
   },
-  "include": ["src"],
+  "include": ["src", "sdk/mpe-ui/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

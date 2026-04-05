@@ -38,6 +38,7 @@ export interface PackInfo {
   description: string;
   resources: Record<ResourceType, ResourceFile[]>;
   namespaces: string[];
+  pack_path?: string;
 }
 
 // 图片信息
@@ -57,6 +58,81 @@ export const VERSION_DESCRIPTIONS: Record<MinecraftVersion, string> = {
   [MinecraftVersion.NewModel]: "1.20.5-1.21.3 (New Components)",
   [MinecraftVersion.ItemsFolder]: "1.21.4+ (Items Folder)",
 };
+
+export type PackSourceType = 'Zip' | 'Folder';
+
+export interface MergeSource {
+  index: number;
+  name: string;
+  source_path: string;
+  source_type: PackSourceType;
+  description: string;
+  pack_format: number;
+  file_count: number;
+}
+
+export interface FileConflict {
+  path: string;
+  source_indices: number[];
+  winner_index: number;
+}
+
+export interface SourceStats {
+  name: string;
+  total_files: number;
+  conflict_files: number;
+  unique_files: number;
+}
+
+export interface MergeConflictSummary {
+  conflicts: FileConflict[];
+  total_conflicts: number;
+  source_stats: Record<string, SourceStats>;
+}
+
+export interface MergePreview {
+  sources: MergeSource[];
+  conflicts: MergeConflictSummary;
+  total_merged_files: number;
+  priority_order: string[];
+}
+
+export interface MergeProgress {
+  phase: string;
+  current: number;
+  total: number;
+  current_file: string | null;
+}
+
+export interface MergeResult {
+  output_path: string;
+  total_files: number;
+  conflicts_resolved: number;
+  output_description: string;
+  output_pack_format: number;
+}
+
+export interface MergeSourceInput {
+  path: string;
+  source_type: PackSourceType;
+}
+
+export interface ConflictResolution {
+  path: string;
+  chosen_source: string;
+  winner_index?: number;
+  exclude?: boolean;
+}
+
+export interface MergeConfig {
+  output_dir: string;
+  output_file_name: string;
+  final_description: string;
+  final_pack_format: number;
+  conflict_resolutions: ConflictResolution[];
+  blacklist_patterns?: string[];
+  whitelist_patterns?: string[];
+}
 
 // 资源类型显示名称
 export const RESOURCE_TYPE_NAMES: Record<ResourceType, string> = {

@@ -9,18 +9,10 @@ import {
   type VersionInfo,
 } from "../utils/tauri-api";
 import "./CreatePackModal.css";
-import { FolderIcon, NewFolderIcon } from "./Icons";
-
-interface DownloadProgress {
-  task_id: string;
-  status: string;
-  current: number;
-  total: number;
-  current_file: string | null;
-  speed: number;
-  eta: number | null;
-  error: string | null;
-}
+import { Icon } from "@mpe/ui";
+import { formatBytes } from '../utils/shared';
+import type { DownloadProgress } from '../types/download';
+import { getColorCodeList } from '../utils/minecraft-text';
 
 interface CreatePackModalProps {
   onClose: () => void;
@@ -54,25 +46,8 @@ export default function CreatePackModal({
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
 
-  // 颜色代码映射
-  const COLOR_CODES = [
-    { code: '0', name: '黑色', color: '#000000' },
-    { code: '1', name: '深蓝', color: '#0000AA' },
-    { code: '2', name: '深绿', color: '#00AA00' },
-    { code: '3', name: '青色', color: '#00AAAA' },
-    { code: '4', name: '深红', color: '#AA0000' },
-    { code: '5', name: '紫色', color: '#AA00AA' },
-    { code: '6', name: '金色', color: '#FFAA00' },
-    { code: '7', name: '灰色', color: '#AAAAAA' },
-    { code: '8', name: '深灰', color: '#555555' },
-    { code: '9', name: '蓝色', color: '#5555FF' },
-    { code: 'a', name: '绿色', color: '#55FF55' },
-    { code: 'b', name: '天蓝', color: '#55FFFF' },
-    { code: 'c', name: '红色', color: '#FF5555' },
-    { code: 'd', name: '粉色', color: '#FF55FF' },
-    { code: 'e', name: '黄色', color: '#FFFF55' },
-    { code: 'f', name: '白色', color: '#FFFFFF' },
-  ];
+  // 颜色代码映射（使用共享工具）
+  const COLOR_CODES = getColorCodeList();
 
   const FORMAT_CODES = [
     { code: 'l', name: '粗体', style: 'bold' },
@@ -126,16 +101,9 @@ export default function CreatePackModal({
         unlisten();
       }
     };
-  }, [step, downloadTaskId, onSuccess]);
+  }, [step, downloadTaskId, onSuccess, outputPath, packName]);
 
-  // 格式化文件大小
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-  };
+
 
   // 格式化时间
   const formatTime = (seconds: number): string => {
@@ -318,13 +286,11 @@ export default function CreatePackModal({
       <div className="modal-content">
         <div className="modal-header">
           <div className="modal-title">
-            <NewFolderIcon className="modal-icon" />
+            <Icon name="new-folder" size={24} className="modal-icon" />
             <h2>创建新材质包</h2>
           </div>
           <button className="close-btn" onClick={onClose}>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M15 5L5 15M5 5L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-            </svg>
+            <Icon name="close" size={20} />
           </button>
         </div>
 
@@ -406,7 +372,7 @@ export default function CreatePackModal({
               <div className="form-group">
                 <label>保存位置 *</label>
                 <button onClick={handleSelectFolder} className="folder-select-btn">
-                  <FolderIcon className="btn-icon-sm" />
+                  <Icon name="folder" size={16} className="btn-icon-sm" />
                   {outputPath || "点击选择保存文件夹"}
                 </button>
               </div>
@@ -550,11 +516,7 @@ export default function CreatePackModal({
           <div className="lang-fallback-overlay">
             <div className="lang-fallback-dialog">
               <div className="lang-fallback-header">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="12" y1="8" x2="12" y2="12"></line>
-                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
+                <Icon name="report-issue" size={24} style={{ width: 48, height: 48 }} />
                 <h3>语言文件提示</h3>
               </div>
               <div className="lang-fallback-content">

@@ -133,14 +133,13 @@ impl DownloadManager {
 
     /// 取消任务
     pub async fn cancel_task(&self, task_id: &str) -> Result<(), String> {
-        // 触发取消令牌
+        let mut tasks = self.tasks.write().await;
         let tokens = self.cancel_tokens.lock().await;
         if let Some(token) = tokens.get(task_id) {
             token.cancel();
         }
 
         // 更新任务状态
-        let mut tasks = self.tasks.write().await;
         if let Some(task) = tasks.get_mut(task_id) {
             task.status = DownloadStatus::Cancelled;
             task.progress.status = DownloadStatus::Cancelled;

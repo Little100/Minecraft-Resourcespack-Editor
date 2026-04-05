@@ -1,0 +1,215 @@
+.update-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.3s ease, backdrop-filter 0.3s ease;
+}
+
+.update-overlay.visible {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.update-modal {
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #000000);
+  border-radius: 12px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  transform: scale(0.9) translateY(-20px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.update-modal.visible {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.update-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.changelog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.update-title {
+  margin: 0 0 8px 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.update-version-info {
+  font-size: 14px;
+  color: var(--text-secondary, #666666);
+}
+
+.update-version-info.mono {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+}
+
+.current-version {
+  color: var(--text-primary, #000000);
+}
+
+.version-arrow {
+  margin: 0 8px;
+}
+
+.latest-version {
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.update-content {
+  padding: 20px 24px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.changelog-content {
+  max-height: 60vh;
+  flex: 1;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.3;
+}
+
+.update-content-title {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.update-body {
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--text-secondary, #666666);
+}
+
+.update-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  background: var(--bg-secondary, #f5f5f5);
+  color: var(--text-primary, #000000);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--hover-bg, #e0e0e0);
+}
+
+.btn-primary {
+  padding: 8px 16px;
+  border: none;
+  background: #22c55e;
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.btn-primary:hover {
+  background: #16a34a;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 28px;
+  cursor: pointer;
+  color: var(--text-secondary, #666666);
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.btn-close:hover {
+  background: var(--hover-bg, #f0f0f0);
+}
+
+/* Changelog markdown styles */
+.changelog-content .changelog-h1 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.changelog-content .changelog-h2 {
+  margin-top: 20px;
+  margin-bottom: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-primary, #3b82f6);
+}
+
+.changelog-content .changelog-h3 {
+  margin-top: 12px;
+  margin-bottom: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary, #666666);
+}
+
+.changelog-content .changelog-list {
+  margin: 2px 0;
+  padding-left: 20px;
+}
+
+.changelog-content .changelog-list li {
+  margin: 1px 0;
+}
+
+.changelog-content .changelog-p {
+  margin: 2px 0;
+}
+
+.changelog-content a {
+  color: var(--link-color, #0066cc);
+  text-decoration: underline;
+}
+
+.changelog-content code {
+  background: var(--code-bg, #f5f5f5);
+  padding: 1px 3px;
+  border-radius: 2px;
+  font-family: monospace;
+  font-size: 0.9em;
+}

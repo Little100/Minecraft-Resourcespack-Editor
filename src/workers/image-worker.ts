@@ -12,19 +12,7 @@ interface WorkerResponse {
 }
 
 function processImageData(imageData: ImageData): ImageData {
-  const data = imageData.data;
-  const length = data.length;
-  
-  const processed = new Uint8ClampedArray(length);
-  
-  for (let i = 0; i < length; i += 4) {
-    processed[i] = data[i];
-    processed[i + 1] = data[i + 1];
-    processed[i + 2] = data[i + 2];
-    processed[i + 3] = data[i + 3];
-  }
-  
-  return new ImageData(processed, imageData.width, imageData.height);
+  return imageData;
 }
 
 function calculateHistogram(imageData: ImageData): {

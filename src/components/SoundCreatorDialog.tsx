@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { Icon, Button, useToast } from '@mpe/ui';
 import './SoundCreatorDialog.css';
+import { logger } from '../utils/logger';
 
 interface SoundCreatorDialogProps {
   onClose: () => void;
@@ -58,6 +60,7 @@ interface SoundEventForm {
 }
 
 export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDialogProps) {
+  const toast = useToast();
   const [hasAudioFiles, setHasAudioFiles] = useState<boolean>(false);
   const [isChecking, setIsChecking] = useState<boolean>(true);
   const [translateData, setTranslateData] = useState<TranslateData | null>(null);
@@ -115,7 +118,7 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
       const files = await invoke<string[]>('check_temp_audio_files');
       setHasAudioFiles(files.length > 0);
     } catch (error) {
-      console.error('检查音频文件失败:', error);
+      logger.error('检查音频文件失败:', error);
       setHasAudioFiles(false);
     } finally {
       setIsChecking(false);
@@ -135,7 +138,7 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
           throw new Error('File not found in public directory');
         }
       } catch (fetchError) {
-        console.log('尝试从开发环境路径读取翻译文件...');
+        logger.debug('尝试从开发环境路径读取翻译文件...');
         content = await invoke<string>('read_file_content', {
           filePath: 'sounds/translate/sounds.json'
         });
@@ -155,8 +158,8 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
       setCategories(categorized);
       setFilteredCategories(categorized);
     } catch (error) {
-      console.error('读取翻译文件失败:', error);
-      alert('读取音效翻译文件失败，请确保已下载音效资源');
+      logger.error('读取翻译文件失败:', error);
+      toast({ message: '读取音效翻译文件失败，请确保已下载音效资源', type: 'error' });
     } finally {
       setIsLoadingData(false);
     }
@@ -304,7 +307,7 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
   const handleSave = async () => {
     const error = validateForm();
     if (error) {
-      alert(error);
+      toast({ message: error, type: 'warning' });
       return;
     }
     
@@ -317,7 +320,7 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
         });
         currentData = JSON.parse(currentContent);
       } catch (readError) {
-        console.log('sounds.json 不存在，将创建新文件');
+        logger.debug('sounds.json 不存在，将创建新文件');
         currentData = {};
       }
       
@@ -346,29 +349,29 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
         content: newContent
       });
       
-      console.log('自定义音效保存成功，文件内容:', newContent);
+      logger.debug('自定义音效保存成功，文件内容:', newContent);
       
       // 复制所有音频文件
       for (const sound of formData.sounds) {
         if (sound.name) {
           try {
-            console.log('开始复制音频文件:', sound.name);
+            logger.debug('开始复制音频文件:', sound.name);
             await invoke('copy_sound_file', {
               soundName: sound.name
             });
-            console.log('音频文件复制成功:', sound.name);
+            logger.debug('音频文件复制成功:', sound.name);
           } catch (copyError) {
-            console.error('复制音频文件失败:', sound.name, copyError);
+            logger.error('复制音频文件失败:', sound.name, copyError);
           }
         }
       }
       
-      alert('音效已成功保存！');
+      toast({ message: '音效已成功保存！', type: 'success' });
       onSave(newEvent);
       onClose();
     } catch (error) {
-      console.error('保存失败:', error);
-      alert(`保存失败: ${error}`);
+      logger.error('保存失败:', error);
+      toast({ message: `保存失败: ${error}`, type: 'error' });
     }
   };
 
@@ -504,11 +507,11 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
         });
         currentData = JSON.parse(currentContent);
       } catch (readError) {
-        console.log('sounds.json 不存在，将创建新文件');
+        logger.debug('sounds.json 不存在，将创建新文件');
         currentData = {};
       }
       
-      console.log('当前文件数据:', currentData);
+      logger.debug('当前文件数据:', currentData);
       
       const newEvent: any = {
         sounds: [sound.name]
@@ -547,34 +550,34 @@ export default function SoundCreatorDialog({ onClose, onSave }: SoundCreatorDial
       
       const newContent = JSON.stringify(currentData, null, 2);
       
-      console.log('准备写入文件，路径: assets/minecraft/sounds/sounds.json');
-      console.log('写入内容:', newContent);
+      logger.debug('准备写入文件，路径: assets/minecraft/sounds/sounds.json');
+      logger.debug('写入内容:', newContent);
       
       await invoke('write_file_content', {
         filePath: 'assets/minecraft/sounds/sounds.json',
         content: newContent
       });
       
-      console.log('write_file_content 调用完成');
+      logger.debug('write_file_content 调用完成');
       
       // 复制音频文件
       try {
-        console.log('开始复制音频文件:', sound.name);
+        logger.debug('开始复制音频文件:', sound.name);
         await invoke('copy_sound_file', {
           soundName: sound.name
         });
-        console.log('音频文件复制成功');
+        logger.debug('音频文件复制成功');
       } catch (copyError) {
-        console.error('复制音频文件失败:', copyError);
-        alert(`警告：音效配置已保存，但音频文件复制失败: ${copyError}`);
+        logger.error('复制音频文件失败:', copyError);
+        toast({ message: `警告：音效配置已保存，但音频文件复制失败: ${copyError}`, type: 'warning' });
       }
       
-      alert(`音效 "${sound.chinese || key}" 已成功添加！`);
+      toast({ message: `音效 "${sound.chinese || key}" 已成功添加！`, type: 'success' });
       onSave(newEvent);
       onClose();
     } catch (error) {
-      console.error('保存原版音效失败:', error);
-      alert(`保存失败: ${error}`);
+      logger.error('保存原版音效失败:', error);
+      toast({ message: `保存失败: ${error}`, type: 'error' });
     }
   };
 
@@ -623,12 +626,12 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
             }
           }
         } catch (checkError) {
-          console.error('检查文件失败:', checkError);
+          logger.error('检查文件失败:', checkError);
           setAudioUrl('');
           setError('音频文件不存在');
         }
       } catch (error) {
-        console.error('加载音频URL失败:', error);
+        logger.error('加载音频URL失败:', error);
         setAudioUrl('');
         setError('加载音频失败');
       } finally {
@@ -646,7 +649,7 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
       audioRef.current.pause();
     } else {
       audioRef.current.play().catch(err => {
-        console.error('播放失败:', err);
+        logger.error('播放失败:', err);
         setError('无法播放音频文件');
       });
     }
@@ -772,16 +775,12 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
 
       {!isChecking && !hasAudioFiles && (
         <div className="sound-creator-error">
-          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
+          <Icon name="report-issue" size={24} style={{ width: 64, height: 64 }} />
           <h3>没有音频文件</h3>
           <p>必须要下载音频文件才可以使用此功能</p>
-          <button className="btn-primary" onClick={onClose}>
+          <Button variant="primary" onClick={onClose}>
             关闭
-          </button>
+          </Button>
         </div>
       )}
 
@@ -796,9 +795,7 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
                   title="返回上一层"
                   data-version="v2"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M19 12H5M12 19l-7-7 7-7" />
-                  </svg>
+                  <Icon name="arrow-left" size={20} />
                 </button>
               )}
               <div className="breadcrumb">
@@ -821,10 +818,7 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
               </div>
             </div>
             <button className="dialog-close" onClick={onClose} title="关闭">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
+              <Icon name="close" size={16} />
             </button>
           </div>
           <div className="sound-creator-content">
@@ -832,10 +826,7 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
               <>
                 {/* 搜索框 */}
                 <div className="sound-search-box">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <path d="m21 21-4.35-4.35"></path>
-                  </svg>
+                  <Icon name="search" size={16} />
                   <input
                     type="text"
                     placeholder="搜索音效..."
@@ -1026,12 +1017,12 @@ const AudioPlayer = ({ soundPath }: { soundPath: string }) => {
 
                   {/* 底部操作按钮 */}
                   <div className="form-footer">
-                    <button className="btn-secondary" onClick={handleBackToList}>
+                    <Button variant="secondary" onClick={handleBackToList}>
                       取消
-                    </button>
-                    <button className="btn-primary" onClick={handleSave}>
+                    </Button>
+                    <Button variant="primary" onClick={handleSave}>
                       保存音效
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </>

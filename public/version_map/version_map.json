@@ -262,8 +262,6 @@
       "19w36a",
       "19w35a",
       "19w34a",
-      "Combat Test 3",
-      "Combat Test 2",
       "1.14.3 - Combat Test",
       "1.14.4",
       "1.14.4 Pre-Release 7",
@@ -383,7 +381,6 @@
       "17w48a"
     ],
     "5": [
-      "Combat Test 6",
       "1.16.2 Pre-release 3",
       "1.16.2 Pre-release 2",
       "1.16.2 Pre-release 1",
@@ -420,9 +417,6 @@
       "20w09a",
       "20w08a",
       "20w07a",
-      "Snapshot 20w06a",
-      "Combat Test 5",
-      "Combat Test 4",
       "1.15.2",
       "1.15.2 Pre-release 2",
       "1.15.2 Pre-Release 1",
@@ -438,6 +432,7 @@
       "1.15 Pre-release 1"
     ],
     "6": [
+      "20w45a",
       "1.16.5",
       "1.16.5 Release Candidate 1",
       "1.16.4",
@@ -450,41 +445,7 @@
       "1.16.2 Release Candidate 2",
       "1.16.2 Release Candidate 1"
     ],
-    "8": [
-      "Deep Dark Experimental Snapshot 1",
-      "1.18.2",
-      "1.18.2 Release Candidate 1",
-      "1.18.2 Pre-release 3",
-      "1.18.2 Pre-release 2",
-      "1.18.2 Pre-release 1",
-      "22w07a",
-      "22w06a",
-      "22w05a",
-      "22w03a",
-      "1.18.1",
-      "1.18.1 Release Candidate 3",
-      "1.18.1 Release Candidate 2",
-      "1.18.1 Release Candidate 1",
-      "1.18.1 Pre-release 1",
-      "1.18",
-      "1.18 Release Candidate 4",
-      "1.18 Release Candidate 3",
-      "1.18 Release Candidate 2",
-      "1.18 Release Candidate 1",
-      "1.18 Pre-release 8",
-      "1.18 Pre-release 7",
-      "1.18 Pre-release 6",
-      "1.18 Pre-release 5",
-      "1.18 Pre-release 4",
-      "1.18 Pre-release 3",
-      "1.18 Pre-release 2",
-      "1.18 Pre-release 1",
-      "21w44a",
-      "21w43a",
-      "21w42a",
-      "21w41a",
-      "21w40a",
-      "21w39a",
+    "7": [
       "21w38a",
       "21w37a",
       "1.18 experimental snapshot 7",
@@ -528,58 +489,39 @@
       "20w51a",
       "20w49a",
       "20w48a",
-      "20w46a",
-      "20w45a",
-      "Combat Test 8c",
-      "Combat Test 8b",
-      "Combat Test 8",
-      "Combat Test 7c",
-      "Combat Test 7b",
-      "Combat Test 7"
+      "20w46a"
     ],
-    "15": [
-      "1.20.1",
-      "1.20.1 Release Candidate 1",
-      "1.20",
-      "1.20 Release Candidate 1",
-      "1.20 Pre-release 7",
-      "1.20 Pre-release 6",
-      "1.20 Pre-release 5",
-      "1.20 Pre-release 4",
-      "1.20 Pre-release 3",
-      "1.20 Pre-release 2",
-      "1.20 Pre-release 1",
-      "23w18a",
-      "23w17a",
-      "23w16a",
-      "23w14a",
-      "23w13a",
-      "23w12a",
-      "1.19.4",
-      "1.19.4 Release Candidate 3",
-      "1.19.4 Release Candidate 2",
-      "1.19.4 Release Candidate 1",
-      "1.19.4 Pre-release 4",
-      "1.19.4 Pre-release 3",
-      "1.19.4 Pre-release 2",
-      "1.19.4 Pre-release 1",
-      "23w07a",
-      "23w06a",
-      "23w05a",
-      "23w04a",
-      "23w03a",
-      "1.19.3",
-      "1.19.3 Release Candidate 3",
-      "1.19.3 Release Candidate 2",
-      "1.19.3 Release Candidate 1",
-      "1.19.3 Pre-release 3",
-      "1.19.3 Pre-release 2",
-      "1.19.3 Pre-release 1",
-      "22w46a",
-      "22w45a",
-      "22w44a",
-      "22w43a",
-      "22w42a",
+    "8": [
+      "22w07a",
+      "22w06a",
+      "22w05a",
+      "22w03a",
+      "1.18.1",
+      "1.18.1 Release Candidate 3",
+      "1.18.1 Release Candidate 2",
+      "1.18.1 Release Candidate 1",
+      "1.18.1 Pre-release 1",
+      "1.18",
+      "1.18 Release Candidate 4",
+      "1.18 Release Candidate 3",
+      "1.18 Release Candidate 2",
+      "1.18 Release Candidate 1",
+      "1.18 Pre-release 8",
+      "1.18 Pre-release 7",
+      "1.18 Pre-release 6",
+      "1.18 Pre-release 5",
+      "1.18 Pre-release 4",
+      "1.18 Pre-release 3",
+      "1.18 Pre-release 2",
+      "1.18 Pre-release 1",
+      "21w44a",
+      "21w43a",
+      "21w42a",
+      "21w41a",
+      "21w40a",
+      "21w39a"
+    ],
+    "9": [
       "1.19.2",
       "1.19.2 Release Candidate 2",
       "1.19.2 Release Candidate 1",
@@ -611,40 +553,111 @@
       "22w14a",
       "22w13a",
       "22w12a",
-      "22w11a"
+      "22w11a",
+      "1.18.2",
+      "1.18.2 Release Candidate 1",
+      "1.18.2 Pre-release 3",
+      "1.18.2 Pre-release 2",
+      "1.18.2 Pre-release 1"
+    ],
+    "10": [
+      "1.19.3",
+      "1.19.3 Release Candidate 3",
+      "1.19.3 Release Candidate 2",
+      "1.19.3 Release Candidate 1",
+      "1.19.3 Pre-release 3",
+      "1.19.3 Pre-release 2",
+      "1.19.3 Pre-release 1",
+      "22w46a",
+      "22w45a"
+    ],
+    "11": [
+      "23w05a",
+      "23w04a",
+      "23w03a",
+      "22w44a",
+      "22w43a",
+      "22w42a"
+    ],
+    "12": [
+      "1.19.4",
+      "1.19.4 Release Candidate 3",
+      "1.19.4 Release Candidate 2",
+      "1.19.4 Release Candidate 1",
+      "1.19.4 Pre-release 4",
+      "1.19.4 Pre-release 3",
+      "1.19.4 Pre-release 2",
+      "1.19.4 Pre-release 1",
+      "23w07a",
+      "23w06a"
+    ],
+    "13": [
+      "23w14a",
+      "23w13a",
+      "23w12a"
+    ],
+    "14": [
+      "23w17a",
+      "23w16a"
+    ],
+    "15": [
+      "1.20.1",
+      "1.20.1 Release Candidate 1",
+      "1.20",
+      "1.20 Release Candidate 1",
+      "1.20 Pre-release 7",
+      "1.20 Pre-release 6",
+      "1.20 Pre-release 5",
+      "1.20 Pre-release 4",
+      "1.20 Pre-release 3",
+      "1.20 Pre-release 2",
+      "1.20 Pre-release 1",
+      "23w18a"
     ],
     "16": [
       "23w31a"
     ],
-    "18": [
-      "23w41a",
-      "23w40a",
-      "1.20.2",
-      "1.20.2 Release Candidate 2",
-      "1.20.2 Release Candidate 1",
-      "1.20.2 Pre-Release 4",
-      "1.20.2 Pre-Release 3",
-      "1.20.2 Pre-release 2",
+    "17": [
       "1.20.2 Pre-release 1",
       "23w35a",
       "23w33a",
       "23w32a"
     ],
+    "18": [
+      "23w41a",
+      "1.20.2",
+      "1.20.2 Release Candidate 2",
+      "1.20.2 Release Candidate 1",
+      "1.20.2 Pre-Release 4",
+      "1.20.2 Pre-Release 3",
+      "1.20.2 Pre-release 2"
+    ],
     "19": [
-      "23w42a"
+      "23w42a",
+      "23w40a"
     ],
     "20": [
-      "23w44a",
-      "23w43b",
-      "23w43a"
+      "23w44a"
     ],
     "21": [
-      "23w46a",
-      "23w45a"
+      "23w46a"
     ],
     "22": [
       "23w51b",
       "23w51a",
+      "23w43b",
+      "23w43a"
+    ],
+    "24": [
+      "24w04a",
+      "23w45a"
+    ],
+    "25": [
+      "24w05b",
+      "24w05a"
+    ],
+    "26": [
+      "24w07a",
       "1.20.4",
       "1.20.4 Release Candidate 1",
       "1.20.3",
@@ -654,28 +667,20 @@
       "1.20.3 Pre-Release 2",
       "1.20.3 Pre-Release 1"
     ],
-    "24": [
-      "24w04a",
-      "24w03b",
-      "24w03a"
-    ],
-    "25": [
-      "24w05b",
-      "24w05a"
-    ],
-    "26": [
-      "24w07a",
-      "24w06a"
-    ],
     "28": [
       "24w10a",
-      "24w09a"
+      "24w03b",
+      "24w03a"
     ],
     "29": [
       "24w11a"
     ],
     "30": [
       "24w12a"
+    ],
+    "31": [
+      "1.20.5 Pre-Release 3",
+      "24w06a"
     ],
     "32": [
       "1.20.6",
@@ -684,18 +689,11 @@
       "1.20.5 Release Candidate 3",
       "1.20.5 Release Candidate 2",
       "1.20.5 Release Candidate 1",
-      "1.20.5 Pre-Release 4",
-      "1.20.5 Pre-Release 3",
-      "1.20.5 Pre-Release 2",
-      "1.20.5 Pre-Release 1",
-      "24w14a",
-      "24w13a"
+      "1.20.5 Pre-Release 4"
     ],
     "33": [
       "24w20a",
-      "24w19b",
-      "24w19a",
-      "24w18a"
+      "24w09a"
     ],
     "34": [
       "1.21.1",
@@ -703,31 +701,33 @@
       "1.21",
       "1.21 Release Candidate 1",
       "1.21 Pre-Release 4",
-      "1.21 Pre-Release 3",
-      "1.21 Pre-Release 2",
-      "1.21 Pre-Release 1",
-      "24w21b",
-      "24w21a"
+      "1.21 Pre-Release 3"
     ],
     "35": [
       "24w33a"
     ],
     "36": [
-      "24w35a",
-      "24w34a"
+      "24w35a"
     ],
     "37": [
-      "24w36a"
+      "24w36a",
+      "24w13a"
     ],
     "38": [
-      "24w37a"
+      "24w37a",
+      "24w14a"
     ],
     "39": [
       "24w39a",
-      "24w38a"
+      "1.20.5 Pre-Release 1"
     ],
     "40": [
-      "24w40a"
+      "24w40a",
+      "1.20.5 Pre-Release 2"
+    ],
+    "41": [
+      "1.21.2 Pre-Release 2",
+      "1.21.2 Pre-Release 1"
     ],
     "42": [
       "1.21.3",
@@ -737,14 +737,20 @@
       "1.21.2 Pre-Release 5",
       "1.21.2 Pre-Release 4",
       "1.21.2 Pre-Release 3",
-      "1.21.2 Pre-Release 2",
-      "1.21.2 Pre-Release 1"
+      "24w18a"
     ],
     "43": [
-      "24w44a"
+      "24w44a",
+      "24w19b",
+      "24w19a"
     ],
     "44": [
       "24w45a"
+    ],
+    "45": [
+      "24w46a",
+      "24w21b",
+      "24w21a"
     ],
     "46": [
       "1.21.4",
@@ -753,11 +759,11 @@
       "1.21.4 Release Candidate 1",
       "1.21.4 Pre-Release 3",
       "1.21.4 Pre-Release 2",
-      "1.21.4 Pre-Release 1",
-      "24w46a"
+      "1.21 Pre-Release 1"
     ],
     "47": [
-      "25w02a"
+      "25w02a",
+      "1.21 Pre-Release 2"
     ],
     "48": [
       "25w03a"
@@ -766,7 +772,8 @@
       "25w04a"
     ],
     "50": [
-      "25w05a"
+      "25w05a",
+      "24w34a"
     ],
     "51": [
       "25w06a"
@@ -776,17 +783,18 @@
     ],
     "53": [
       "25w09b",
-      "25w09a",
-      "25w08a"
+      "25w09a"
+    ],
+    "54": [
+      "25w10a",
+      "24w38a"
     ],
     "55": [
       "1.21.5",
       "1.21.5 Release Candidate 2",
       "1.21.5 Release Candidate 1",
       "1.21.5 Pre-Release 3",
-      "1.21.5 Pre-release 2",
-      "1.21.5 Pre-Release 1",
-      "25w10a"
+      "1.21.5 Pre-release 2"
     ],
     "56": [
       "25w15a"
@@ -801,7 +809,8 @@
       "25w18a"
     ],
     "60": [
-      "25w19a"
+      "25w19a",
+      "1.21.4 Pre-Release 1"
     ],
     "61": [
       "25w20a"
@@ -814,9 +823,7 @@
       "1.21.6",
       "1.21.6 Release Candidate 1",
       "1.21.6 Pre-Release 4",
-      "1.21.6 Pre-Release 3",
-      "1.21.6 Pre-Release 2",
-      "1.21.6 Pre-Release 1"
+      "1.21.6 Pre-Release 3"
     ],
     "64": [
       "1.21.8",
@@ -825,8 +832,6 @@
       "1.21.7 Release Candidate 2"
     ],
     "65": [
-      "25w33a",
-      "25w32a",
       "25w31a"
     ],
     "66": [
@@ -838,7 +843,8 @@
     ],
     "68": [
       "25w36b",
-      "25w36a"
+      "25w36a",
+      "25w08a"
     ],
     "69": [
       "1.21.10",
@@ -847,13 +853,11 @@
       "1.21.9 Release Candidate 1",
       "1.21.9 Pre-Release 4",
       "1.21.9 Pre-Release 3",
-      "1.21.9 Pre-Release 2",
-      "1.21.9 Pre-Release 1",
-      "25w37a"
+      "1.21.9 Pre-Release 2"
     ],
     "70": [
-      "25w42a",
-      "25w41a"
+      "25w41a",
+      "1.21.5 Pre-Release 1"
     ],
     "71": [
       "25w43a"
@@ -870,13 +874,84 @@
       "25w46a Unobfuscated"
     ],
     "75": [
+      "1.21.11",
+      "1.21.11 Unobfuscated",
+      "1.21.11 Release Candidate 3",
+      "1.21.11 Release Candidate 3 Unobfuscated",
+      "1.21.11 Release Candidate 2",
+      "1.21.11 Release Candidate 2 Unobfuscated",
+      "1.21.11 Release Candidate 1",
+      "1.21.11 Release Candidate 1 Unobfuscated",
+      "1.21.11 Pre-Release 5",
+      "1.21.11 Pre-Release 5 Unobfuscated",
+      "1.21.11 Pre-Release 4",
+      "1.21.11 Pre-Release 4 Unobfuscated"
+    ],
+    "76": [
+      "26.1 Snapshot 1"
+    ],
+    "77": [
+      "26.1 Snapshot 2"
+    ],
+    "78": [
+      "26.1 Snapshot 3"
+    ],
+    "79": [
+      "26.1 Snapshot 5",
+      "1.21.6 Pre-Release 2",
+      "1.21.6 Pre-Release 1"
+    ],
+    "80": [
+      "26.1 Snapshot 6"
+    ],
+    "81": [
+      "26.1 Snapshot 7"
+    ],
+    "82": [
+      "26.1 Snapshot 10"
+    ],
+    "83": [
+      "26.1 Snapshot 11"
+    ],
+    "84": [
+      "26.1",
+      "26.1 Release Candidate 3",
+      "26.1 Release Candidate 2",
+      "26.1 Release Candidate 1",
+      "26.1 Pre-Release 3",
+      "26.1 Pre-Release 2",
+      "26.1 Pre-Release 1"
+    ],
+    "87": [
+      "25w37a"
+    ],
+    "94": [
       "1.21.11 Pre-Release 3",
       "1.21.11 Pre-Release 3 Unobfuscated",
       "1.21.11 Pre-Release 2",
       "1.21.11 Pre-Release 2 Unobfuscated",
       "1.21.11 Pre-Release 1",
       "1.21.11 Pre-Release 1 Unobfuscated"
+    ],
+    "81.1": [
+      "26.1 Snapshot 9",
+      "26.1 Snapshot 8"
+    ],
+    "78.1": [
+      "26.1 Snapshot 4"
+    ],
+    "70.1": [
+      "25w42a"
+    ],
+    "87.1": [
+      "1.21.9 Pre-Release 1"
+    ],
+    "65.2": [
+      "25w33a"
+    ],
+    "65.1": [
+      "25w32a"
     ]
   },
-  "last_updated": "2025-11-29T19:17:00.159032"
+  "last_updated": "2026-04-05T07:30:07.418Z"
 }

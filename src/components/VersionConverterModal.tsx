@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { selectZipFile, selectFolder, selectOutputFolder } from '../utils/tauri-api';
 import { getVersionRange, getVersionsWithType, isReleaseVersion, getVersionsByPackFormat } from '../utils/version-map';
+import { Icon, useToast } from '@mpe/ui';
 import './VersionConverterModal.css';
+import { logger } from '../utils/logger';
+import { useThemeDetector } from '../hooks/useThemeDetector';
+import { formatMinecraftTextHtml } from '../utils/minecraft-text';
 
 interface PackMetadata {
   pack_format?: number;
@@ -18,6 +22,7 @@ interface VersionConverterModalProps {
 }
 
 const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
+  const toast = useToast();
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [packMetadata, setPackMetadata] = useState<PackMetadata | null>(null);
   const [currentVersion, setCurrentVersion] = useState<string>('未知版本');
@@ -38,7 +43,133 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
   const [showPreviewVersions, setShowPreviewVersions] = useState(false);
   const [versionSearchQuery, setVersionSearchQuery] = useState<string>('');
   const [showVersionDropdown, setShowVersionDropdown] = useState(false);
+  const [isDraggingOnConverter, setIsDraggingOnConverter] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const analyzeRef = useRef<(path: string, type: 'zip' | 'folder') => Promise<void>>(() => { throw new Error('not initialized'); });
+  const currentTheme = useThemeDetector();
+
+  // 从拖拽路径中提取文件路径 (Tauri WebView2 下 DataTransfer 不带 path)
+  const extractNativePath = (file: File): string | undefined => {
+    const withPath = file as File & { path?: string };
+    return typeof withPath.path === 'string' && withPath.path.length > 0
+      ? withPath.path
+      : undefined;
+  };
+
+  const handleConverterDragEnter = (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOnConverter(true);
+  };
+
+  const handleConverterDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleConverterDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = e.relatedTarget as Node | null;
+    if (next && (e.currentTarget as HTMLElement).contains(next)) return;
+    setIsDraggingOnConverter(false);
+  };
+
+  const handleConverterDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOnConverter(false);
+
+    const paths: string[] = [];
+    for (const file of Array.from(e.dataTransfer.files)) {
+      const p = extractNativePath(file);
+      if (p) paths.push(p);
+    }
+
+    if (paths.length === 0) {
+      toast({ message: '未获取到本地路径，请使用「导入 ZIP 文件」或「导入文件夹」按钮选择', type: 'warning' });
+      return;
+    }
+
+    const firstPath = paths[0];
+    const isZip = /\.zip$/i.test(firstPath);
+
+    try {
+      setError(null);
+      setSelectedPath(firstPath);
+      setLoading(true);
+
+      // 生成默认输出文件名
+      if (isZip) {
+        const inputFileName = firstPath.split(/[/\\]/).pop() || 'pack';
+        const defaultFileName = inputFileName.replace(/\.(zip|mcpack)$/i, '') + '_converted.zip';
+        setOutputFileName(defaultFileName);
+        await analyzeRef.current(firstPath, 'zip');
+      } else {
+        const folderName = firstPath.split(/[/\\]/).pop() || 'pack';
+        setOutputFileName(`${folderName}_converted`);
+        await analyzeRef.current(firstPath, 'folder');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Tauri 系统级拖放（WebView 原生拖放事件）
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    void import('@tauri-apps/api/webview').then(async ({ getCurrentWebview }) => {
+      if (!alive) return;
+      try {
+        const fn = await getCurrentWebview().onDragDropEvent((event) => {
+          if (!alive) return;
+          const p = event.payload;
+          if (p.type === 'drop' && p.paths.length > 0) {
+            const firstPath = p.paths[0];
+            const isZip = /\.zip$/i.test(firstPath);
+
+            setError(null);
+            setSelectedPath(firstPath);
+            setLoading(true);
+
+            const doAnalyze = async () => {
+              try {
+                if (isZip) {
+                  const inputFileName = firstPath.split(/[/\\]/).pop() || 'pack';
+                  const defaultFileName = inputFileName.replace(/\.(zip|mcpack)$/i, '') + '_converted.zip';
+                  setOutputFileName(defaultFileName);
+                  await analyzeRef.current(firstPath, 'zip');
+                } else {
+                  const folderName = firstPath.split(/[/\\]/).pop() || 'pack';
+                  setOutputFileName(`${folderName}_converted`);
+                  await analyzeRef.current(firstPath, 'folder');
+                }
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setLoading(false);
+              }
+            };
+
+            doAnalyze();
+          }
+        });
+        if (alive) unlisten = fn;
+        else fn();
+      } catch {
+        /* 非 Tauri 环境 */
+      }
+    });
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
 
   // 点击外部关闭下拉框
   useEffect(() => {
@@ -74,7 +205,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
         const defaultFileName = inputFileName.replace(/\.(zip|mcpack)$/i, '') + '_converted.zip';
         setOutputFileName(defaultFileName);
         
-        await analyzePackMetadata(zipPath, 'zip');
+        await analyzeRef.current(zipPath, 'zip');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -95,7 +226,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
         const folderName = folderPath.split(/[/\\]/).pop() || 'pack';
         setOutputFileName(`${folderName}_converted`);
         
-        await analyzePackMetadata(folderPath, 'folder');
+        await analyzeRef.current(folderPath, 'folder');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -119,7 +250,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
         );
         setAvailableVersions(versionsWithRaw);
       } catch (err) {
-        console.error('[VersionConverter] 无法加载版本列表:', err);
+        logger.error('[VersionConverter] 无法加载版本列表:', err);
       }
     };
     loadVersions();
@@ -231,7 +362,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
         targetVersion: selectedTargetVersion
       });
 
-      console.log('[VersionConverter] 转换结果:', result);
+      logger.debug('[VersionConverter] 转换结果:', result);
       setConversionSuccess(true);
     } catch (err) {
       setError('转换失败: ' + (err instanceof Error ? err.message : String(err)));
@@ -240,18 +371,18 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
     }
   };
 
-  const analyzePackMetadata = async (path: string, type: 'zip' | 'folder') => {
+  analyzeRef.current = async (path: string, type: 'zip' | 'folder') => {
     try {
-      console.log('[VersionConverter] 开始分析资源包');
-      console.log('[VersionConverter] 路径:', path);
-      console.log('[VersionConverter] 类型:', type);
+      logger.debug('[VersionConverter] 开始分析资源包');
+      logger.debug('[VersionConverter] 路径:', path);
+      logger.debug('[VersionConverter] 类型:', type);
       
       const metadata = await invoke<PackMetadata>('read_pack_mcmeta', {
         path,
         isZip: type === 'zip'
       });
 
-      console.log('[VersionConverter] 读取到的metadata:', JSON.stringify(metadata, null, 2));
+      logger.debug('[VersionConverter] 读取到的metadata:', JSON.stringify(metadata, null, 2));
       setPackMetadata(metadata);
 
       // 解析描述
@@ -262,14 +393,14 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
         } else if (typeof metadata.description === 'object' && 'text' in metadata.description) {
           desc = (metadata.description as any).text;
         }
-        console.log('[VersionConverter] 描述:', desc);
+        logger.debug('[VersionConverter] 描述:', desc);
         setDescription(desc);
       }
 
       // 解析版本信息
-      console.log('[VersionConverter] pack_format:', metadata.pack_format);
-      console.log('[VersionConverter] min_format:', metadata.min_format);
-      console.log('[VersionConverter] max_format:', metadata.max_format);
+      logger.debug('[VersionConverter] pack_format:', metadata.pack_format);
+      logger.debug('[VersionConverter] min_format:', metadata.min_format);
+      logger.debug('[VersionConverter] max_format:', metadata.max_format);
       
       // 优先使用pack_format
       let currentPackFormat: number | undefined = metadata.pack_format;
@@ -286,7 +417,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
       if (currentPackFormat) {
         try {
           const versionsInfo = await getVersionsWithType(currentPackFormat);
-          console.log('[VersionConverter] 查询到的版本信息:', versionsInfo);
+          logger.debug('[VersionConverter] 查询到的版本信息:', versionsInfo);
           
           setAllVersionsData(versionsInfo);
           
@@ -308,29 +439,29 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
             setCurrentVersionHtml('未知版本');
           }
         } catch (error) {
-          console.error('[VersionConverter] 版本查询失败:', error);
+          logger.error('[VersionConverter] 版本查询失败:', error);
           setCurrentVersion('未知版本');
           setCurrentVersionHtml('未知版本');
         }
       } else {
-        console.log('[VersionConverter] 没有pack_format字段');
+        logger.debug('[VersionConverter] 没有pack_format字段');
         setCurrentVersion('未知版本');
         setCurrentVersionHtml('未知版本');
       }
 
       // 解析支持的版本范围
       const supportedFormats = metadata.supported_format || metadata.supported_formats;
-      console.log('[VersionConverter] supported_format/formats:', supportedFormats);
+      logger.debug('[VersionConverter] supported_format/formats:', supportedFormats);
       if (supportedFormats) {
         let minFormat = 0;
         let maxFormat = 0;
         
         if (Array.isArray(supportedFormats)) {
-          console.log('[VersionConverter] supported_format是数组:', supportedFormats);
+          logger.debug('[VersionConverter] supported_format是数组:', supportedFormats);
           minFormat = supportedFormats[0] || 0;
           maxFormat = supportedFormats[1] || minFormat;
         } else if (typeof supportedFormats === 'object') {
-          console.log('[VersionConverter] supported_format是对象:', supportedFormats);
+          logger.debug('[VersionConverter] supported_format是对象:', supportedFormats);
           const { min_inclusive, max_inclusive } = supportedFormats;
           minFormat = min_inclusive || 0;
           maxFormat = max_inclusive || minFormat;
@@ -364,7 +495,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                   allVersionsHtml.push(...previewChips);
                 }
               } catch (error) {
-                console.error(`[VersionConverter] 查询pack_format ${format}失败:`, error);
+                logger.error(`[VersionConverter] 查询pack_format ${format}失败:`, error);
               }
             }
             
@@ -377,20 +508,20 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
               
               if (!selectedTargetVersion) {
                 setSelectedTargetVersion(firstVersion);
-                console.log('[VersionConverter] 默认选择最低版本:', firstVersion);
+                logger.debug('[VersionConverter] 默认选择最低版本:', firstVersion);
               }
             } else {
               setSupportedVersionRange('未知版本');
               setSupportedVersionHtml('未知版本');
             }
           } catch (error) {
-            console.error('[VersionConverter] 解析supported_format失败:', error);
+            logger.error('[VersionConverter] 解析supported_format失败:', error);
             setSupportedVersionRange('未知版本');
             setSupportedVersionHtml('未知版本');
           }
         }
       } else {
-        console.log('[VersionConverter] 没有supported_format/formats字段');
+        logger.debug('[VersionConverter] 没有supported_format/formats字段');
         setSupportedVersionRange('');
         setSupportedVersionHtml('');
       }
@@ -400,7 +531,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
       
       if (errorMsg.includes('pack.mcmeta') || errorMsg.includes('not found') || errorMsg.includes('找不到')) {
         // 找不到pack.mcmeta显示错误
-        alert('无效的资源包：未找到pack.mcmeta文件。\n请确保选择的是有效的Minecraft资源包。');
+        toast({ message: '无效的资源包：未找到pack.mcmeta文件', type: 'error' });
         onClose();
         return;
       } else {
@@ -449,65 +580,30 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
     return true;
   });
 
-  const formatMinecraftText = (text: string): string => {
-    // 检测当前主题
-    const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-    
-    const colorMapDark: { [key: string]: string } = {
-      '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
-      '4': '#AA0000', '5': '#AA00AA', '6': '#FFAA00', '7': '#AAAAAA',
-      '8': '#555555', '9': '#5555FF', 'a': '#55FF55', 'b': '#55FFFF',
-      'c': '#FF5555', 'd': '#FF55FF', 'e': '#FFFF55', 'f': '#FFFFFF',
-      'r': 'reset'
-    };
-    
-    // 浅色模式下的颜色映射
-    const colorMapLight: { [key: string]: string } = {
-      '0': '#000000', '1': '#0000AA', '2': '#00AA00', '3': '#00AAAA',
-      '4': '#AA0000', '5': '#AA00AA', '6': '#CC8800', '7': '#555555',
-      '8': '#333333', '9': '#3333DD', 'a': '#00CC00', 'b': '#00AAAA',
-      'c': '#DD3333', 'd': '#DD33DD', 'e': '#CCAA00', 'f': '#333333',
-      'r': 'reset'
-    };
-
-    const colorMap = isDarkMode ? colorMapDark : colorMapLight;
-    const defaultColor = isDarkMode ? '#AAAAAA' : '#333333';
-
-    let result = '';
-    let i = 0;
-    let currentColor = defaultColor;
-
-    while (i < text.length) {
-      if (text[i] === '§' && i + 1 < text.length) {
-        const code = text[i + 1].toLowerCase();
-        if (colorMap[code]) {
-          if (code === 'r') {
-            currentColor = defaultColor;
-          } else {
-            currentColor = colorMap[code];
-          }
-          i += 2;
-          continue;
-        }
-      }
-      result += `<span style="color: ${currentColor}">${text[i]}</span>`;
-      i++;
-    }
-
-    return result;
-  };
-
   return (
     <>
       <div className="overlay" onClick={onClose}></div>
-      <div className="version-converter-modal">
+      <div
+        className="version-converter-modal"
+        onDragEnter={handleConverterDragEnter}
+        onDragOver={handleConverterDragOver}
+        onDragLeave={handleConverterDragLeave}
+        onDrop={handleConverterDrop}
+      >
+        {/* 拖拽遮罩层 */}
+        {isDraggingOnConverter && (
+          <div className="drag-overlay">
+            <div className="drag-overlay-content">
+              <Icon name="folder" size={32} />
+              <p>拖放文件夹或 ZIP 文件以选择资源包</p>
+            </div>
+          </div>
+        )}
+
         <div className="modal-header">
           <h2>转换版本</h2>
           <button className="close-btn" onClick={onClose}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
+            <Icon name="close" size={24} />
           </button>
         </div>
 
@@ -517,18 +613,11 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
               <p className="section-title">选择要转换的资源包</p>
               <div className="import-buttons">
                 <button className="import-btn" onClick={handleSelectZip} disabled={loading}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                    <polyline points="14 2 14 8 20 8"></polyline>
-                    <line x1="12" y1="18" x2="12" y2="12"></line>
-                    <line x1="9" y1="15" x2="15" y2="15"></line>
-                  </svg>
+                  <Icon name="new-file" size={24} />
                   <span>导入 ZIP 文件</span>
                 </button>
                 <button className="import-btn" onClick={handleSelectFolder} disabled={loading}>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                  </svg>
+                  <Icon name="folder" size={24} />
                   <span>导入文件夹</span>
                 </button>
               </div>
@@ -544,7 +633,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                 {description && (
                   <div className="info-item">
                     <span className="info-label">描述:</span>
-                    <span className="info-value minecraft-text" dangerouslySetInnerHTML={{ __html: formatMinecraftText(description) }}></span>
+                    <span className="info-value minecraft-text" dangerouslySetInnerHTML={{ __html: formatMinecraftTextHtml(description, currentTheme) }}></span>
                   </div>
                 )}
                 {packMetadata?.pack_format && (
@@ -558,19 +647,14 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              console.log('[VersionConverter] 按钮被点击，当前状态:', showAllVersions);
-                              console.log('[VersionConverter] allVersionsData:', allVersionsData);
+                              logger.debug('[VersionConverter] 按钮被点击，当前状态:', showAllVersions);
+                              logger.debug('[VersionConverter] allVersionsData:', allVersionsData);
                               setShowAllVersions(!showAllVersions);
                             }}
                             title="查看完整支持列表"
                             type="button"
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor">
-                              <path d="M248,64C146.39,64,64,146.39,64,248s82.39,184,184,184,184-82.39,184-184S349.61,64,248,64Z" style={{ fill: 'none', stroke: 'currentcolor', strokeMiterlimit: 10, strokeWidth: '32px' }}></path>
-                              <polyline points="220 220 252 220 252 336" style={{ fill: 'none', stroke: 'currentcolor', strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: '32px' }}></polyline>
-                              <line x1="208" y1="340" x2="296" y2="340" style={{ fill: 'none', stroke: 'currentcolor', strokeLinecap: 'round', strokeMiterlimit: 10, strokeWidth: '32px' }}></line>
-                              <path d="M248,130a26,26,0,1,0,26,26A26,26,0,0,0,248,130Z"></path>
-                            </svg>
+                            <Icon name="info" size={20} />
                           </button>
                         )}
                       </div>
@@ -663,10 +747,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                             padding: '0.25rem'
                           }}
                         >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                          </svg>
+                          <Icon name="close" size={16} />
                         </button>
                       )}
                     </div>
@@ -702,20 +783,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                           : '-- 请选择目标版本 --'
                         }
                       </span>
-                      <svg
-                        className={`arrow-icon ${showVersionDropdown ? 'open' : ''}`}
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="20"
-                        height="20"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                      </svg>
+                      <Icon name="chevron-down" size={20} className={`arrow-icon ${showVersionDropdown ? 'open' : ''}`} />
                     </div>
                     
                     {showVersionDropdown && (
@@ -759,9 +827,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                       onClick={handleSelectOutputPath}
                       disabled={converting}
                     >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                      </svg>
+                      <Icon name="folder" size={20} />
                       浏览
                     </button>
                   </div>
@@ -777,11 +843,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
                       whiteSpace: 'pre-line'
                     }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffc107" strokeWidth="2" style={{ flexShrink: 0, marginTop: '2px' }}>
-                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                          <line x1="12" y1="9" x2="12" y2="13"></line>
-                          <line x1="12" y1="17" x2="12.01" y2="17"></line>
-                        </svg>
+                        <Icon name="warning" size={20} color="#ffc107" style={{ flexShrink: 0, marginTop: '2px' }} />
                         <span>{sameDirectoryWarning}</span>
                       </div>
                     </div>
@@ -844,11 +906,7 @@ const VersionConverterModal = ({ onClose }: VersionConverterModalProps) => {
 
         {error && (
           <div className="error-message">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="12"></line>
-              <line x1="12" y1="16" x2="12.01" y2="16"></line>
-            </svg>
+            <Icon name="report-issue" size={20} />
             <span>{error}</span>
           </div>
         )}

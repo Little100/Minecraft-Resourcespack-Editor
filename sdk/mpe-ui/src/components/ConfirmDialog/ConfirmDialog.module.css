@@ -1,0 +1,65 @@
+.confirmDialog {}
+
+.content {
+  display: flex;
+  gap: var(--space-lg);
+  align-items: flex-start;
+}
+
+.iconWrapper {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+}
+
+.icon-info {
+  background: var(--info-light);
+  color: var(--info);
+}
+
+.icon-warning {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.icon-danger {
+  background: var(--error-light);
+  color: var(--error);
+}
+
+.textContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+  line-height: var(--line-height-tight);
+}
+
+.message {
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+  line-height: var(--line-height-normal);
+}
+
+.message p {
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xl);
+}

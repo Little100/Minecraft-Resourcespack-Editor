@@ -7,6 +7,9 @@ import PackMetaVisualEditor from "./PackMetaVisualEditor";
 import { writeFileContent } from "../utils/tauri-api";
 import { getCompletions, validateJson } from "../utils/json-schema-helper";
 import { getVersionsByPackFormat } from "../utils/version-map";
+import { Icon, useToast } from '@mpe/ui';
+import { logger } from '../utils/logger';
+import { parseMinecraftText } from '../utils/minecraft-text';
 
 interface PackMetaEditorProps {
   content: string;
@@ -15,104 +18,6 @@ interface PackMetaEditorProps {
   onSave?: () => void;
 }
 
-// 颜色代码映射
-const MINECRAFT_COLORS: { [key: string]: string } = {
-  '0': '#000000', // 黑色
-  '1': '#0000AA', // 深蓝色
-  '2': '#00AA00', // 深绿色
-  '3': '#00AAAA', // 深青色
-  '4': '#AA0000', // 深红色
-  '5': '#AA00AA', // 深紫色
-  '6': '#FFAA00', // 金色
-  '7': '#AAAAAA', // 灰色
-  '8': '#555555', // 深灰色
-  '9': '#5555FF', // 蓝色
-  'a': '#55FF55', // 绿色
-  'b': '#55FFFF', // 青色
-  'c': '#FF5555', // 红色
-  'd': '#FF55FF', // 紫色
-  'e': '#FFFF55', // 黄色
-  'f': '#FFFFFF', // 白色
-};
-
-const parseMinecraftText = (text: string): React.ReactElement[] => {
-  if (typeof text !== 'string') {
-    return [<span key="0">{String(text)}</span>];
-  }
-
-  const parts: React.ReactElement[] = [];
-  let currentIndex = 0;
-  let currentColor = '#FFFFFF';
-  let isBold = false;
-  let isItalic = false;
-  let isUnderline = false;
-  let isStrikethrough = false;
-
-  const regex = /§([0-9a-fklmnor])/gi;
-  let match;
-  let lastIndex = 0;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const textBefore = text.substring(lastIndex, match.index);
-      parts.push(
-        <span
-          key={currentIndex++}
-          style={{
-            color: currentColor,
-            fontWeight: isBold ? 'bold' : 'normal',
-            fontStyle: isItalic ? 'italic' : 'normal',
-            textDecoration: `${isUnderline ? 'underline' : ''} ${isStrikethrough ? 'line-through' : ''}`.trim() || 'none',
-          }}
-        >
-          {textBefore}
-        </span>
-      );
-    }
-
-    const code = match[1].toLowerCase();
-    
-    if (MINECRAFT_COLORS[code]) {
-      currentColor = MINECRAFT_COLORS[code];
-    } else if (code === 'l') {
-      isBold = true;
-    } else if (code === 'o') {
-      isItalic = true;
-    } else if (code === 'n') {
-      isUnderline = true;
-    } else if (code === 'm') {
-      isStrikethrough = true;
-    } else if (code === 'r') {
-      currentColor = '#FFFFFF';
-      isBold = false;
-      isItalic = false;
-      isUnderline = false;
-      isStrikethrough = false;
-    } else if (code === 'k') {}
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    const remainingText = text.substring(lastIndex);
-    parts.push(
-      <span
-        key={currentIndex++}
-        style={{
-          color: currentColor,
-          fontWeight: isBold ? 'bold' : 'normal',
-          fontStyle: isItalic ? 'italic' : 'normal',
-          textDecoration: `${isUnderline ? 'underline' : ''} ${isStrikethrough ? 'line-through' : ''}`.trim() || 'none',
-        }}
-      >
-        {remainingText}
-      </span>
-    );
-  }
-
-  return parts.length > 0 ? parts : [<span key="0">{text}</span>];
-};
-
 interface ContextMenu {
   x: number;
   y: number;
@@ -120,6 +25,7 @@ interface ContextMenu {
 }
 
 export default function PackMetaEditor({ content, filePath, onChange, onSave }: PackMetaEditorProps) {
+  const toast = useToast();
   const [text, setText] = useState(content);
   const [viewMode, setViewMode] = useState<'split' | 'source' | 'preview'>('split');
   const [parseError, setParseError] = useState<string | null>(null);
@@ -150,7 +56,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
   useEffect(() => {
     const loadVersions = async () => {
       if (!parsedData?.pack) {
-        console.log('[版本映射] 没有 pack 数据，跳过加载');
+        logger.debug('[版本映射] 没有 pack 数据，跳过加载');
         return;
       }
       
@@ -160,7 +66,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       // 优先使用
       if (pack.pack_format) {
         formats.push(pack.pack_format);
-        console.log('[版本映射] 检测到 pack_format:', pack.pack_format);
+        logger.debug('[版本映射] 检测到 pack_format:', pack.pack_format);
       }
       
       if (pack.min_format) {
@@ -168,7 +74,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         if (!formats.includes(minFormat)) {
           formats.push(minFormat);
         }
-        console.log('[版本映射] 检测到 min_format:', minFormat);
+        logger.debug('[版本映射] 检测到 min_format:', minFormat);
       }
       
       if (pack.max_format) {
@@ -176,27 +82,27 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         if (!formats.includes(maxFormat)) {
           formats.push(maxFormat);
         }
-        console.log('[版本映射] 检测到 max_format:', maxFormat);
+        logger.debug('[版本映射] 检测到 max_format:', maxFormat);
       }
       
       if (formats.length === 0) {
-        console.log('[版本映射] 没有找到任何格式版本号');
+        logger.debug('[版本映射] 没有找到任何格式版本号');
         return;
       }
 
-      console.log('[版本映射] 需要加载的格式:', formats);
+      logger.debug('[版本映射] 需要加载的格式:', formats);
       
       // 加载所有需要的格式
       for (const format of formats) {
         if (packFormatVersions[format]) {
-          console.log('[版本映射] 格式', format, '已缓存:', packFormatVersions[format]);
+          logger.debug('[版本映射] 格式', format, '已缓存:', packFormatVersions[format]);
           continue;
         }
 
-        console.log('[版本映射] 开始加载格式', format, '的版本信息...');
+        logger.debug('[版本映射] 开始加载格式', format, '的版本信息...');
         try {
           const versions = await getVersionsByPackFormat(format);
-          console.log('[版本映射] 格式', format, '获取到的版本列表:', versions);
+          logger.debug('[版本映射] 格式', format, '获取到的版本列表:', versions);
           
           if (versions && versions.length > 0) {
             // 区分正式版和预览版
@@ -218,20 +124,20 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             
             fullRange = firstAll === lastAll ? firstAll : `${firstAll} - ${lastAll}`;
             
-            console.log('[版本映射] 格式', format, '正式版范围:', releaseRange, '完整范围:', fullRange);
+            logger.debug('[版本映射] 格式', format, '正式版范围:', releaseRange, '完整范围:', fullRange);
             setPackFormatVersions(prev => ({
               ...prev,
               [format]: JSON.stringify({ release: releaseRange, full: fullRange })
             }));
           } else {
-            console.log('[版本映射] 格式', format, '版本列表为空');
+            logger.debug('[版本映射] 格式', format, '版本列表为空');
             setPackFormatVersions(prev => ({
               ...prev,
               [format]: JSON.stringify({ release: '', full: '未知版本' })
             }));
           }
         } catch (error) {
-          console.error('[版本映射] 格式', format, '加载失败:', error);
+          logger.error('[版本映射] 格式', format, '加载失败:', error);
           setPackFormatVersions(prev => ({
             ...prev,
             [format]: JSON.stringify({ release: '', full: '加载失败' })
@@ -330,7 +236,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     const cursorPos = textarea.selectionStart;
     const beforeCursor = newText.substring(0, cursorPos);
     
-    console.log('[补全] 输入变化:', {
+    logger.debug('[补全] 输入变化:', {
       lastChar: newText[cursorPos - 1],
       beforeCursor: beforeCursor.slice(-30),
       cursorPos
@@ -338,10 +244,10 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     
     const shouldTrigger = /[\{,]\s*[a-zA-Z_][a-zA-Z0-9_]*$/.test(beforeCursor);
     
-    console.log('[补全] 是否触发:', shouldTrigger);
+    logger.debug('[补全] 是否触发:', shouldTrigger);
     
     if (shouldTrigger) {
-      console.log('[补全] 立即触发补全');
+      logger.debug('[补全] 立即触发补全');
       requestAnimationFrame(() => {
         triggerCompletion(newText, cursorPos);
       });
@@ -358,26 +264,26 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
 
   // 触发补全
   const triggerCompletion = (currentText?: string, currentCursorPos?: number) => {
-    console.log('[补全] triggerCompletion 被调用');
+    logger.debug('[补全] triggerCompletion 被调用');
     
     const textarea = textareaRef.current;
     if (!textarea) {
-      console.log('[补全] textarea 不存在，退出');
+      logger.debug('[补全] textarea 不存在，退出');
       return;
     }
 
     const actualText = currentText !== undefined ? currentText : text;
     const cursorPos = currentCursorPos !== undefined ? currentCursorPos : textarea.selectionStart;
     
-    console.log('[补全] 使用文本:', actualText);
-    console.log('[补全] 光标位置:', cursorPos);
-    console.log('[补全] 调用 getCompletions');
+    logger.debug('[补全] 使用文本:', actualText);
+    logger.debug('[补全] 光标位置:', cursorPos);
+    logger.debug('[补全] 调用 getCompletions');
     
     const items = getCompletions(actualText, cursorPos, 'pack.mcmeta');
-    console.log('[补全] getCompletions 返回:', items);
+    logger.debug('[补全] getCompletions 返回:', items);
     
     if (items.length === 0) {
-      console.log('[补全] 没有补全项');
+      logger.debug('[补全] 没有补全项');
       setShowCompletions(false);
       return;
     }
@@ -386,7 +292,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     const match = beforeCursor.match(/[a-zA-Z_][a-zA-Z0-9_]*$/);
     const currentInput = match ? match[0] : '';
     
-    console.log('[补全] 当前输入:', currentInput);
+    logger.debug('[补全] 当前输入:', currentInput);
     
     let filteredItems = items;
     if (currentInput) {
@@ -395,17 +301,17 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         item.label.toLowerCase().startsWith(currentInput.toLowerCase())
       );
       
-      console.log('[补全] startsWith 过滤后:', filteredItems.length);
+      logger.debug('[补全] startsWith 过滤后:', filteredItems.length);
     }
     
     // 没有匹配项隐藏
     if (filteredItems.length === 0) {
-      console.log('[补全] 没有匹配项，隐藏补全');
+      logger.debug('[补全] 没有匹配项，隐藏补全');
       setShowCompletions(false);
       return;
     }
 
-    console.log('[补全] 最终补全项数量:', filteredItems.length);
+    logger.debug('[补全] 最终补全项数量:', filteredItems.length);
     
     setCompletions(filteredItems);
     setCompletionIndex(0);
@@ -439,7 +345,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       y = textareaRect.top + padding + cursorY - scrollTop - menuHeight;
     }
     
-    console.log('[补全] 菜单位置:', {
+    logger.debug('[补全] 菜单位置:', {
       x,
       y,
       textareaRect,
@@ -451,7 +357,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     
     setCompletionPos({ x: Math.max(0, x), y: Math.max(0, y) });
     setShowCompletions(true);
-    console.log('[补全] 设置 showCompletions = true');
+    logger.debug('[补全] 设置 showCompletions = true');
   };
 
   // 插入补全项
@@ -515,7 +421,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         maxCount
       });
     } catch (error) {
-      console.error('保存历史记录失败:', error);
+      logger.error('保存历史记录失败:', error);
     }
   };
 
@@ -529,7 +435,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       });
       setPersistedHistory(entries);
     } catch (error) {
-      console.error('加载历史记录失败:', error);
+      logger.error('加载历史记录失败:', error);
     }
   };
 
@@ -564,8 +470,8 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       // 重新加载历史记录
       await loadHistoryFromBackend();
     } catch (error) {
-      console.error('删除历史记录失败:', error);
-      alert('删除失败');
+      logger.error('删除历史记录失败:', error);
+      toast({ message: '删除失败', type: 'error' });
     }
   };
 
@@ -584,8 +490,8 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         // 保存历史记录
         await saveHistoryToBackend();
       } catch (error) {
-        console.error('保存文件失败:', error);
-        alert(`保存文件失败: ${error}`);
+        logger.error('保存文件失败:', error);
+        toast({ message: `保存文件失败: ${error}`, type: 'error' });
       }
     }
   };
@@ -762,7 +668,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         onChange(formatted);
       }
     } catch (err) {
-      alert('JSON格式错误，无法格式化');
+      toast({ message: 'JSON格式错误，无法格式化', type: 'error' });
     }
   };
 
@@ -805,7 +711,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
       await navigator.clipboard.writeText(selectedText);
       setContextMenu(null);
     } catch (err) {
-      console.error('复制失败:', err);
+      logger.error('复制失败:', err);
     }
   };
 
@@ -833,7 +739,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         textarea.focus();
       }, 0);
     } catch (err) {
-      console.error('剪切失败:', err);
+      logger.error('剪切失败:', err);
     }
   };
 
@@ -861,7 +767,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
         textarea.focus();
       }, 0);
     } catch (err) {
-      console.error('粘贴失败:', err);
+      logger.error('粘贴失败:', err);
     }
   };
 
@@ -869,11 +775,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
     if (parseError) {
       return (
         <div className="preview-error">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
+          <Icon name="report-issue" size={32} />
           <p>JSON 解析错误</p>
           <span className="error-message">{parseError}</span>
         </div>
@@ -1157,37 +1059,24 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
               onClick={() => setViewMode('source')}
               title="仅源代码"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="16 18 22 12 16 6"></polyline>
-                <polyline points="8 6 2 12 8 18"></polyline>
-              </svg>
+              <Icon name="code" size={16} />
             </button>
             <button
               className={`view-btn ${viewMode === 'split' ? 'active' : ''}`}
               onClick={() => setViewMode('split')}
               title="分栏视图"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <line x1="12" y1="3" x2="12" y2="21"></line>
-              </svg>
+              <Icon name="sidebar" size={16} />
             </button>
             <button
               className={`view-btn ${viewMode === 'preview' ? 'active' : ''}`}
               onClick={() => setViewMode('preview')}
               title="仅预览"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-              </svg>
+              <Icon name="eye" size={16} />
             </button>
             <button className="format-btn" onClick={formatJSON} title="格式化JSON">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="4 7 4 4 20 4 20 7"></polyline>
-                <line x1="9" y1="20" x2="15" y2="20"></line>
-                <line x1="12" y1="4" x2="12" y2="20"></line>
-              </svg>
+              <Icon name="type" size={16} />
             </button>
           </div>
         </div>
@@ -1198,10 +1087,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             disabled={historyIndex === 0}
             title="撤销 (Ctrl+Z)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 7v6h6"/>
-              <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/>
-            </svg>
+            <Icon name="undo" size={16} />
           </button>
           <button
             className="editor-btn"
@@ -1209,30 +1095,21 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             disabled={historyIndex === history.length - 1}
             title="重做 (Ctrl+Y)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 7v6h-6"/>
-              <path d="M3 17a9 9 0 019-9 9 9 0 016 2.3l3 2.7"/>
-            </svg>
+            <Icon name="redo" size={16} />
           </button>
           <button
             className="editor-btn"
             onClick={showHistoryDialog}
             title="历史记录"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <polyline points="12 6 12 12 16 14"></polyline>
-            </svg>
+            <Icon name="clock" size={16} />
           </button>
           <button
             className="editor-btn"
             onClick={() => setShowVisualEditor(true)}
             title="可视化编辑"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 20h9"></path>
-              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-            </svg>
+            <Icon name="pencil" size={16} />
           </button>
           <button
             className="editor-btn save-btn"
@@ -1240,11 +1117,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             disabled={!isDirty}
             title="保存 (Ctrl+S)"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
-              <polyline points="17 21 17 13 7 13 7 21"/>
-              <polyline points="7 3 7 8 15 8"/>
-            </svg>
+            <Icon name="save" size={16} />
           </button>
         </div>
       </div>
@@ -1347,41 +1220,25 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
           }}
         >
           <div className="context-menu-item" onClick={formatJSON}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="4 7 4 4 20 4 20 7"></polyline>
-              <line x1="9" y1="20" x2="15" y2="20"></line>
-              <line x1="12" y1="4" x2="12" y2="20"></line>
-            </svg>
+            <Icon name="type" size={16} />
             <span>格式化</span>
           </div>
           {contextMenu.hasSelection && (
             <>
               <div className="context-menu-item" onClick={handleCopy}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
+                <Icon name="copy" size={16} />
                 <span>复制</span>
                 <span className="menu-shortcut">Ctrl+C</span>
               </div>
               <div className="context-menu-item" onClick={handleCut}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="6" cy="6" r="3"></circle>
-                  <circle cx="6" cy="18" r="3"></circle>
-                  <line x1="20" y1="4" x2="8.12" y2="15.88"></line>
-                  <line x1="14.47" y1="14.48" x2="20" y2="20"></line>
-                  <line x1="8.12" y1="8.12" x2="12" y2="12"></line>
-                </svg>
+                <Icon name="scissors" size={16} />
                 <span>剪切</span>
                 <span className="menu-shortcut">Ctrl+X</span>
               </div>
             </>
           )}
           <div className="context-menu-item" onClick={handlePaste}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
-            </svg>
+            <Icon name="paste" size={16} />
             <span>粘贴</span>
             <span className="menu-shortcut">Ctrl+V</span>
           </div>
@@ -1396,10 +1253,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             <div className="dialog-header">
               <h3>可视化编辑 pack.mcmeta</h3>
               <button className="dialog-close" onClick={() => setShowVisualEditor(false)}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <Icon name="close" size={16} />
               </button>
             </div>
             <PackMetaVisualEditor
@@ -1470,10 +1324,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
             <div className="dialog-header">
               <h3>历史记录</h3>
               <button className="dialog-close" onClick={() => setShowHistoryList(false)}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <Icon name="close" size={16} />
               </button>
             </div>
             <div className="dialog-content">
@@ -1504,10 +1355,7 @@ export default function PackMetaEditor({ content, filePath, onChange, onSave }: 
                             onClick={() => deleteHistoryEntry(entry)}
                             title="删除此历史记录"
                           >
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <polyline points="3 6 5 6 21 6"></polyline>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
+                            <Icon name="delete" size={14} />
                           </button>
                         </div>
                       </div>
