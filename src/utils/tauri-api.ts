@@ -358,3 +358,7 @@ export async function searchFiles(
     useRegex,
   });
 }
+
+export async function openDevtools(): Promise<void> {
+  return await invoke<void>("open_devtools");
+}

@@ -831,94 +831,6 @@ pub async fn preload_folder_aggressive(
         .await
 }
 
-/// Debug信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DebugInfo {
-    pub cpu_cores: usize,
-    pub cached_files: usize,
-    pub gpu_info: String,
-    pub throughput: String,
-    pub total_time: String,
-    pub logs: Vec<DebugLog>,
-}
-
-/// Debug日志条目
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DebugLog {
-    pub level: String,
-    pub message: String,
-}
-
-/// 获取调试信息
-#[tauri::command]
-pub async fn get_debug_info(state: State<'_, AppState>) -> Result<DebugInfo, String> {
-    // 获取CPU核心数
-    let cpu_cores = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4);
-
-    // 获取缓存统计
-    let (cached_files, _loading) = state.preloader.get_stats().await;
-
-    // 获取GPU信息
-    let gpu_info = "请在前端获取".to_string();
-
-    // 读取日志文件
-    let logs = read_latest_logs().await;
-
-    Ok(DebugInfo {
-        cpu_cores,
-        cached_files,
-        gpu_info,
-        throughput: if cached_files > 0 {
-            format!("{} 文件/秒", cached_files)
-        } else {
-            "N/A".to_string()
-        },
-        total_time: "N/A".to_string(),
-        logs,
-    })
-}
-
-/// 打开日志文件夹
-#[tauri::command]
-pub async fn open_logs_folder() -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
-    let exe_dir = exe_path.parent().ok_or("Failed to get exe directory")?;
-    let logs_dir = exe_dir.join("logs");
-
-    // 确保logs目录存在
-    std::fs::create_dir_all(&logs_dir)
-        .map_err(|e| format!("Failed to create logs directory: {}", e))?;
-
-    // 打开文件夹
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(logs_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(logs_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(logs_dir)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-
-    Ok(())
-}
-
 /// 打开指定文件夹
 #[tauri::command]
 pub async fn open_folder(folder_path: String) -> Result<(), String> {
@@ -1059,57 +971,6 @@ pub async fn get_sound_subtitles(state: State<'_, AppState>) -> Result<Vec<Sound
     });
     
     Ok(sound_entries)
-}
-
-/// 读取最新的日志
-async fn read_latest_logs() -> Vec<DebugLog> {
-    let exe_path = match std::env::current_exe() {
-        Ok(path) => path,
-        Err(_) => return Vec::new(),
-    };
-
-    let exe_dir = match exe_path.parent() {
-        Some(dir) => dir,
-        None => return Vec::new(),
-    };
-
-    let log_file = exe_dir.join("logs").join("latest.log");
-
-    if !log_file.exists() {
-        return Vec::new();
-    }
-
-    // 读取日志文件
-    let content = match std::fs::read_to_string(&log_file) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-
-    // 只返回最后50行
-    let lines: Vec<&str> = content.lines().collect();
-    let start = if lines.len() > 50 {
-        lines.len() - 50
-    } else {
-        0
-    };
-
-    lines[start..]
-        .iter()
-        .filter_map(|line| {
-            if let Some(level_start) = line.find("] [") {
-                if let Some(level_end) = line[level_start + 3..].find(']') {
-                    let level = &line[level_start + 3..level_start + 3 + level_end];
-                    let message = &line[level_start + 3 + level_end + 2..];
-
-                    return Some(DebugLog {
-                        level: level.to_lowercase(),
-                        message: message.to_string(),
-                    });
-                }
-            }
-            None
-        })
-        .collect()
 }
 
 /// 搜索结果
@@ -1955,4 +1816,11 @@ pub async fn get_pack_meta_from_source(
 
     serde_json::from_str(&mcmeta_content)
         .map_err(|e| format!("无法解析 pack.mcmeta JSON: {}", e))
+}
+
+/// 打开devtools
+#[tauri::command]
+pub async fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.open_devtools();
+    Ok(())
 }

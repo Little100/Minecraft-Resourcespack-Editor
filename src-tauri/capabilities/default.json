@@ -18,6 +18,13 @@
     "core:webview:allow-webview-size",
     "opener:default",
     "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "name": "https", "protocol": "https", "allow": [{ "host": "**" }] },
+        { "name": "http", "protocol": "http", "allow": [{ "host": "**" }] }
+      ]
+    },
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:default",

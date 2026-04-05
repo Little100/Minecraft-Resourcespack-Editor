@@ -1,6 +1,6 @@
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { open } from '@tauri-apps/plugin-shell';
+import { openDevtools } from '../utils/tauri-api';
 import { useState, useEffect } from 'react';
 import './TitleBar.css';
 import logoImg from '../assets/logo.png';
@@ -174,43 +174,11 @@ const TitleBar = ({
   );
 
   const handleOpenDebugWindow = async () => {
-    logger.debug('[Debug] 点击了debug按钮');
     try {
-      try {
-        const debugWindow = await WebviewWindow.getByLabel('debug');
-        if (debugWindow) {
-          logger.debug('[Debug] 找到已存在的窗口，聚焦');
-          await debugWindow.setFocus();
-          return;
-        }
-      } catch (e) {
-        logger.debug('[Debug] 窗口不存在，准备创建新窗口');
-      }
-
-      logger.debug('[Debug] 开始创建debug窗口');
-      const debugWindow = new WebviewWindow('debug', {
-        url: 'debug.html',
-        title: 'Debug Console',
-        width: 800,
-        height: 600,
-        resizable: true,
-        center: true,
-        decorations: true,
-        transparent: false,
-      });
-
-      logger.debug('[Debug] 窗口创建成功');
-      
-      debugWindow.once('tauri://created', () => {
-        logger.debug('[Debug] 窗口已创建并显示');
-      });
-
-      debugWindow.once('tauri://error', (e) => {
-        logger.error('[Debug] 窗口创建失败:', e);
-      });
+      await openDevtools();
     } catch (error) {
-      logger.error('[Debug] Failed to open debug window:', error);
-      toast({ message: '无法打开调试窗口: ' + error, type: 'error' });
+      logger.error('[Debug] Failed to open devtools:', error);
+      toast({ message: '无法打开开发者工具: ' + error, type: 'error' });
     }
   };
 
@@ -265,7 +233,7 @@ const TitleBar = ({
           <button
             className="titlebar-button debug"
             onClick={handleOpenDebugWindow}
-            title="打开调试窗口"
+            title="开发者工具"
           >
             <Icon name="debug" size={20} />
           </button>
