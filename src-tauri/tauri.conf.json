@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https:; font-src 'self' data: https:; connect-src 'self' https: http://localhost:*; media-src 'self' blob: data:"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https: http://q.qlogo.cn; font-src 'self' data: https:; connect-src 'self' https://gitee.com https://gitee.com/api/v5 https://api.github.com https://github.com https://raw.githubusercontent.com https://launchermeta.mojang.com https://piston-meta.mojang.com https://piston-data.mojang.com https://resources.download.minecraft.net https://cdn.jsdelivr.net http://localhost:*; media-src 'self' blob: data:"
     }
   },
   "bundle": {
