@@ -7,7 +7,7 @@ interface VersionMap {
   last_updated: string;
 }
 
-const GITHUB_PAGES_URL = 'https://little100.github.io/minecraft-resourcespack-editor/version_map/version_map.json';
+const GITHUB_PAGES_URL = 'https://raw.githubusercontent.com/Little100/Minecraft-Resourcespack-Editor/main/public/version_map/version_map.json';
 
 const FALLBACK_VERSION_MAP: VersionMap = {
   resource_pack: {
