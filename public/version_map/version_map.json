@@ -914,6 +914,7 @@
       "26.1 Snapshot 11"
     ],
     "84": [
+      "26.1.2",
       "26.1.2 Release Candidate 1",
       "26.1",
       "26.1 Release Candidate 3",
@@ -924,6 +925,7 @@
       "26.1 Pre-Release 1"
     ],
     "85": [
+      "26.2 Snapshot 2",
       "26.2-snapshot-1"
     ],
     "87": [
@@ -957,5 +959,5 @@
       "25w32a"
     ]
   },
-  "last_updated": "2026-04-09T00:59:11.909Z"
+  "last_updated": "2026-04-10T01:09:36.817Z"
 }
