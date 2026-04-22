@@ -942,6 +942,9 @@
       "1.21.11 Pre-Release 1",
       "1.21.11 Pre-Release 1 Unobfuscated"
     ],
+    "86.1": [
+      "26.2 Snapshot 4"
+    ],
     "81.1": [
       "26.1 Snapshot 9",
       "26.1 Snapshot 8"
@@ -962,5 +965,5 @@
       "25w32a"
     ]
   },
-  "last_updated": "2026-04-21T01:14:02.661Z"
+  "last_updated": "2026-04-22T01:12:13.007Z"
 }
