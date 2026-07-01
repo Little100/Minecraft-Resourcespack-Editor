@@ -950,6 +950,9 @@
     "89": [
       "26.3 Snapshot 1"
     ],
+    "90": [
+      "26.3 Snapshot 2"
+    ],
     "94": [
       "1.21.11 Pre-Release 3",
       "1.21.11 Pre-Release 3 Unobfuscated",
@@ -985,5 +988,5 @@
       "25w32a"
     ]
   },
-  "last_updated": "2026-06-30T01:56:23.738Z"
+  "last_updated": "2026-07-01T02:01:55.960Z"
 }
